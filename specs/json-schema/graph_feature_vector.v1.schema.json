@@ -1,0 +1,81 @@
+{
+  "$id": "https://spec.tsl.network/schemas/graph_feature_vector.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "subject",
+    "graph_profile_id",
+    "computed_at",
+    "weighted_degree_bps",
+    "reciprocity_bps",
+    "counterparty_hhi_bps",
+    "counterparty_entropy_bps",
+    "effective_counterparty_count_milli",
+    "seed_escape_bps",
+    "adversarial_proximity_bps",
+    "privacy_disclosure_level",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.graph_feature_vector.v1"
+    },
+    "subject": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "graph_profile_id": {
+      "type": "string"
+    },
+    "computed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "weighted_degree_bps": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reciprocity_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "counterparty_hhi_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "counterparty_entropy_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "effective_counterparty_count_milli": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "seed_escape_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "adversarial_proximity_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "privacy_disclosure_level": {
+      "enum": [
+        "aggregate_only",
+        "pairwise",
+        "local_only",
+        "public"
+      ]
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+openapi: 3.1.0
+info:
+  title: TSL Resolver API
+  version: 0.1.0
+paths:
+  /v1/identity/{trustId}:
+    get:
+      summary: Resolve a TrustID document.
+      responses:
+        "200": { description: Identity document }
+  /v1/identity/{trustId}/revocations:
+    get:
+      summary: Resolve revocation state for a TrustID.
+      responses:
+        "200": { description: Revocation records }
+  /v1/revocation/{trustId}:
+    get:
+      summary: Resolve revocation state for a TrustID.
+      responses:
+        "200": { description: Revocation records }

@@ -1,0 +1,111 @@
+{
+  "$id": "https://spec.tsl.network/schemas/scoring_profile.v2.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "profile_id",
+    "provider",
+    "domain",
+    "model_family",
+    "model_version",
+    "feature_registry_commitment",
+    "normalization_profile_commitment",
+    "weight_profile_commitment",
+    "calibration_profile_commitment",
+    "threshold_policy_commitment",
+    "privacy_policy_commitment",
+    "evaluation_report_commitment",
+    "issued_at",
+    "valid_after",
+    "expires_at",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.scoring_profile.v2"
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "domain": {
+      "enum": [
+        "anti_phishing",
+        "marketplace_trust",
+        "agent_delegation",
+        "opensource_maintainer",
+        "professional_identity",
+        "customer_support",
+        "local_verifier"
+      ]
+    },
+    "model_family": {
+      "enum": [
+        "transparent_weighted_logistic",
+        "calibrated_tree_ensemble",
+        "graph_risk_model",
+        "local_rule_policy",
+        "human_review_hybrid"
+      ]
+    },
+    "model_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"
+    },
+    "feature_registry_uri": {
+      "type": "string"
+    },
+    "feature_registry_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "normalization_profile_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "weight_profile_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "calibration_profile_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "threshold_policy_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "privacy_policy_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "evaluation_report_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "appeal_policy_uri": {
+      "type": "string"
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "valid_after": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    }
+  }
+}

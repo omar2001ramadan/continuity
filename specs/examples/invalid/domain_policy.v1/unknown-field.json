@@ -1,0 +1,21 @@
+{
+  "type": "tsl.domain_policy.v1",
+  "domain": "agent_payments",
+  "policy_version": "1.0.0",
+  "requires_settlement": true,
+  "requires_delegation_check": true,
+  "requires_content_opening": false,
+  "min_coverage_bps": 7000,
+  "max_assessment_age_seconds": 86400,
+  "false_positive_cost_class": "high",
+  "false_negative_cost_class": "critical",
+  "sparse_identity_default": "require_step_up",
+  "thresholds": {
+    "trusted_bps": 9000,
+    "likely_trusted_bps": 7500,
+    "medium_bps": 5500,
+    "suspicious_bps": 3500,
+    "high_risk_bps": 1500
+  },
+  "platform": "gmail"
+}

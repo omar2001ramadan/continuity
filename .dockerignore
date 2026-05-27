@@ -1,0 +1,11 @@
+node_modules
+packages/core-rust/target
+packages/core-python/.pytest_cache
+contracts/artifacts
+contracts/cache
+circuits/build
+deployments
+reports
+.git
+.env
+.DS_Store

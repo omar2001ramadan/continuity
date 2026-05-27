@@ -1,0 +1,17 @@
+{
+  "$id": "https://spec.tsl.network/schemas/attestation.v1.json",
+  "type": "object",
+  "required": ["type", "issuer", "subject", "attestation_class", "claim_commitment", "visibility", "issued_at", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.attestation.v1" },
+    "issuer": { "type": "string", "pattern": "^did:tsl:" },
+    "subject": { "type": "string", "pattern": "^did:tsl:" },
+    "attestation_class": { "type": "string" },
+    "claim_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "visibility": { "enum": ["public", "selective", "private"] },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

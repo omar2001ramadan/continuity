@@ -1,0 +1,16 @@
+{
+  "type": "tsl.batch_checkpoint.v1",
+  "epoch_start_ms": 1779667200000,
+  "epoch_duration_ms": 300000,
+  "shard": "00af",
+  "event_root": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "receipt_root": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "attestation_root": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "revocation_root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "event_count": 1,
+  "receipt_count": 1,
+  "previous_checkpoint": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "relay_id": "did:tsl:relay:test",
+  "relay_signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+  "unexpected_field": true
+}

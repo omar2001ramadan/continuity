@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "revocation.v1/compromise",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.revocation.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0x6d74e79817b7b79abbb81d4fad98729f0452bca61e7cc5fc891a43267ead1ede",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

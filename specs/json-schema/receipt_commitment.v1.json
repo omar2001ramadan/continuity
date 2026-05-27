@@ -1,0 +1,16 @@
+{
+  "$id": "https://spec.tsl.network/schemas/receipt_commitment.v1.json",
+  "type": "object",
+  "required": ["type", "event_commitment", "receiver", "signing_key_id", "receipt_class", "timestamp", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.receipt_commitment.v1" },
+    "event_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "receiver": { "type": "string", "pattern": "^did:tsl:" },
+    "signing_key_id": { "type": "string" },
+    "receipt_class": { "enum": ["received", "replied", "transacted", "completed", "disputed"] },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "metadata_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

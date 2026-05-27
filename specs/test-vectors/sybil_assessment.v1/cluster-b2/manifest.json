@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "sybil_assessment.v1/cluster-b2",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.sybil_assessment.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0xcc3abe2f971087a7f0b0a23683ab71090d9bec66a960c75e920863c54279f663",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

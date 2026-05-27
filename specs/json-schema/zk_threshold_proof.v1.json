@@ -1,0 +1,50 @@
+{
+  "$id": "https://spec.tsl.network/schemas/zk_threshold_proof.v1.json",
+  "type": "object",
+  "required": [
+    "type",
+    "claim",
+    "subject",
+    "threshold",
+    "witness_commitment",
+    "public_input_hash",
+    "proof",
+    "issued_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.zk.threshold_proof.v1" },
+    "claim": {
+      "enum": [
+        "identity_age_days",
+        "reciprocal_receipt_count",
+        "organization_membership",
+        "set_membership",
+        "revocation_set_non_membership",
+        "agent_scope_compliance"
+      ]
+    },
+    "subject": { "type": "string", "pattern": "^did:tsl:" },
+    "threshold": { "type": "integer", "minimum": 0 },
+    "witness_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "public_input_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "proof": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "groth16": {
+      "type": "object",
+      "required": ["protocol", "curve", "proof", "public_signals"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": { "const": "groth16" },
+        "curve": { "const": "bn128" },
+        "proof": { "type": "object" },
+        "public_signals": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "type": "string" }
+        },
+        "verification_key": { "type": "object" }
+      }
+    },
+    "issued_at": { "type": "string", "format": "date-time" }
+  }
+}

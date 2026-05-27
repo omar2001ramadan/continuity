@@ -1,0 +1,5 @@
+[project]
+name = "tsl-agent-sdk"
+version = "0.1.0"
+description = "Agent-side proof helpers for TSL"
+requires-python = ">=3.9"

@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "feature_definition.v2/identity-age",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.feature_definition.v2",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0x694f9915101d0ef338aea7b77153eb15259b8c9b85ef4b9c4bd516eaa5a4877b",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

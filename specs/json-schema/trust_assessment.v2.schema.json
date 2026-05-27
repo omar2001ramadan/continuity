@@ -1,0 +1,165 @@
+{
+  "$id": "https://spec.tsl.network/schemas/trust_assessment.v2.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "assessment_id",
+    "subject",
+    "issuer",
+    "domain",
+    "scoring_profile_id",
+    "model_version",
+    "gate_result",
+    "label",
+    "coverage_bps",
+    "reason_codes",
+    "risk_codes",
+    "issued_at",
+    "expires_at",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.trust_assessment.v2"
+    },
+    "assessment_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "subject": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "issuer": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "domain": {
+      "type": "string"
+    },
+    "scoring_profile_id": {
+      "type": "string"
+    },
+    "model_version": {
+      "type": "string"
+    },
+    "gate_result": {
+      "type": "object",
+      "required": [
+        "schema_valid",
+        "signature_valid",
+        "key_active",
+        "not_revoked"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_valid": {
+          "type": "boolean"
+        },
+        "canonicalization_valid": {
+          "type": "boolean"
+        },
+        "signature_valid": {
+          "type": "boolean"
+        },
+        "key_active": {
+          "type": "boolean"
+        },
+        "not_revoked": {
+          "type": "boolean"
+        },
+        "included_in_log": {
+          "type": "boolean"
+        },
+        "checkpoint_valid": {
+          "type": "boolean"
+        },
+        "settlement_satisfied": {
+          "type": "boolean"
+        },
+        "delegation_valid": {
+          "type": "boolean"
+        }
+      }
+    },
+    "score_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "confidence_interval_bps": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10000
+      }
+    },
+    "coverage_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "label": {
+      "enum": [
+        "trusted",
+        "likely_trusted",
+        "medium_trust",
+        "unknown_caution",
+        "insufficient_evidence",
+        "suspicious",
+        "high_risk",
+        "cryptographic_failure",
+        "revoked_or_compromised",
+        "settlement_missing"
+      ]
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risk_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "feature_vector_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "evidence_coverage_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "privacy_disclosure_level": {
+      "enum": [
+        "none",
+        "aggregate_only",
+        "pairwise",
+        "selective",
+        "public"
+      ]
+    },
+    "appeal_uri": {
+      "type": "string"
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "type": "tsl.attestation.v2",
+  "subject": "did:tsl:test:alice",
+  "attestation_class": "scam_warning",
+  "claim_commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "visibility": "public",
+  "issued_at": "2026-05-25T00:00:00Z",
+  "expires_at": "2026-06-25T00:00:00Z",
+  "status": "appealed",
+  "appeal_uri": "https://appeals.tsl.example/att/1",
+  "evidence_commitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+}

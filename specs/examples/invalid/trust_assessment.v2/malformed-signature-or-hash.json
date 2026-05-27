@@ -1,0 +1,41 @@
+{
+  "type": "tsl.trust_assessment.v2",
+  "assessment_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "subject": "did:tsl:test:alice",
+  "issuer": "did:tsl:provider:continuity-labs",
+  "domain": "anti_phishing",
+  "scoring_profile_id": "did:tsl:provider:continuity-labs/profile/anti-phishing-v2.1.0",
+  "model_version": "2.1.0",
+  "gate_result": {
+    "schema_valid": true,
+    "canonicalization_valid": true,
+    "signature_valid": true,
+    "key_active": true,
+    "not_revoked": true,
+    "included_in_log": true,
+    "checkpoint_valid": true,
+    "settlement_satisfied": true,
+    "delegation_valid": true
+  },
+  "score_bps": 8200,
+  "confidence_interval_bps": [
+    7900,
+    8500
+  ],
+  "coverage_bps": 8800,
+  "label": "likely_trusted",
+  "reason_codes": [
+    "VALID_SIGNATURE",
+    "DIVERSE_RECEIPTS"
+  ],
+  "risk_codes": [
+    "LOW_DRIFT"
+  ],
+  "feature_vector_commitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "evidence_coverage_commitment": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "privacy_disclosure_level": "aggregate_only",
+  "appeal_uri": "https://appeals.tsl.example/a/1",
+  "issued_at": "2026-05-25T00:00:00Z",
+  "expires_at": "2026-06-25T00:00:00Z",
+  "signature": "not-a-signature"
+}

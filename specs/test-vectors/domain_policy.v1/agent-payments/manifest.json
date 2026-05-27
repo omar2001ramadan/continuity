@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "domain_policy.v1/agent-payments",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.domain_policy.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0x726722b697b538861349b8721ec15ea9f78c4eb0e0509052de2ac5006a98e4ac",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

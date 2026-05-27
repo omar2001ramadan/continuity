@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "scoring_profile.v2/valid-transparent",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.scoring_profile.v2",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0x7ae3a73b674778638934c2ec400e1065feb50081ad1682e8d0406d46d516e42b",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

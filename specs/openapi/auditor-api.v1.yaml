@@ -1,0 +1,26 @@
+openapi: 3.1.0
+info:
+  title: TSL Auditor API
+  version: 0.1.0
+paths:
+  /v1/audit/checkpoint:
+    post:
+      summary: Submit or run a checkpoint audit finding.
+      responses:
+        "200": { description: Audit result }
+  /v1/audit/checkpoint-conflict:
+    post:
+      summary: Check an incoming checkpoint against local state.
+      responses:
+        "200": { description: No conflict }
+        "409": { description: Conflict finding }
+  /v1/audit/checkpoints/{epoch}/{shard}:
+    get:
+      summary: Check auditor view of a checkpoint.
+      responses:
+        "200": { description: Audit lookup result }
+  /v1/audit/findings:
+    get:
+      summary: Fetch persisted audit findings.
+      responses:
+        "200": { description: Audit findings }

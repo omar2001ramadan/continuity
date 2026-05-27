@@ -1,0 +1,93 @@
+import "../../../scripts/load-env.cjs";
+import express from "express";
+import {
+  CompositeTrustResolver,
+  createPostgresRepositoryFromEnv,
+  createSettlementBackendFromEnv,
+  MemoryTrustResolver,
+  PostgresTrustResolver,
+  verifyTSL,
+  type IdentityDocumentV1,
+  type VerifierPolicy,
+  type VerifyTSLInput
+} from "../../../packages/core-ts/src/index";
+
+export function createVerifierApi() {
+  const app = express();
+  const settlementBackend = createSettlementBackendFromEnv();
+  const repo = createPostgresRepositoryFromEnv();
+  let migrated = false;
+  async function durableResolver(localIdentities: IdentityDocumentV1[]) {
+    if (!repo) return new MemoryTrustResolver(localIdentities);
+    if (!migrated) {
+      await repo.migrate();
+      migrated = true;
+    }
+    return new CompositeTrustResolver([new MemoryTrustResolver(localIdentities), new PostgresTrustResolver(repo)]);
+  }
+  app.use(express.json({ limit: "1mb" }));
+
+  app.get("/health", (_req, res) => {
+    res.json({ ok: true, service: "tsl-verifier-api" });
+  });
+
+  app.get("/v1/release/health", (_req, res) => {
+    res.json({
+      ok: true,
+      service: "tsl-verifier-api",
+      settlement_backend_configured: Boolean(settlementBackend),
+      postgres_configured: Boolean(repo),
+      zk_claims_supported: ["identity_age_days", "reciprocal_receipt_count"],
+      audit_consistency_supported: true,
+      token_free_verification: true
+    });
+  });
+
+  app.post("/v1/verify", async (req, res) => {
+    try {
+      const identities: IdentityDocumentV1[] = [];
+      if (req.body.identity) identities.push(req.body.identity);
+      if (req.body.identity_document) identities.push(req.body.identity_document);
+      if (Array.isArray(req.body.identities)) identities.push(...req.body.identities);
+
+      const resolver = await durableResolver(identities);
+      const input: VerifyTSLInput = {
+        envelope: req.body.envelope,
+        proof: req.body.proof,
+        checkpoint: req.body.checkpoint,
+        message_disclosure: req.body.message_disclosure,
+        receipts: req.body.receipts,
+        attestations: req.body.attestations,
+        revocations: req.body.revocations,
+        assessment: req.body.assessment,
+        zk_proofs: req.body.zk_proofs,
+        delegations: req.body.delegations,
+        audit_findings: req.body.audit_findings
+      };
+      const policy: VerifierPolicy = req.body.policy ?? {
+        require_inclusion: Boolean(req.body.proof),
+        require_checkpoint: Boolean(req.body.checkpoint),
+        require_settlement: false
+      };
+
+      const result = await verifyTSL(input, resolver, policy, settlementBackend ?? undefined);
+      res.status(result.verified ? 200 : 422).json(result);
+    } catch (error) {
+      res.status(400).json({
+        error: {
+          code: "TSL_VERIFY_REQUEST_INVALID",
+          message: error instanceof Error ? error.message : "Invalid verify request"
+        }
+      });
+    }
+  });
+
+  return app;
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const port = Number(process.env.PORT ?? 8083);
+  createVerifierApi().listen(port, () => {
+    process.stdout.write(`tsl verifier-api listening on http://localhost:${port}\n`);
+  });
+}

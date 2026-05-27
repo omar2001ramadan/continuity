@@ -1,0 +1,24 @@
+{
+  "type": "tsl.evaluation_report.v1",
+  "report_id": "eval-reference-scorer-v0",
+  "model_id": "reference-scorer-v0",
+  "domain": "anti_phishing",
+  "dataset_commitments": [
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  ],
+  "metrics": {
+    "auroc_bps": 9200,
+    "auprc_bps": 8800,
+    "ece_bps": 300,
+    "coverage_bps": 9000,
+    "sparse_identity_false_positive_bps": 150,
+    "privacy_leakage_bps": 200,
+    "p95_latency_ms": 40
+  },
+  "promotion_gate_result": "pass",
+  "red_team_result": "pass",
+  "issued_at": "2026-05-25T00:00:00Z",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+  "platform": "gmail"
+}

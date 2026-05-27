@@ -1,0 +1,22 @@
+{
+  "policy_id": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "principal": "did:tsl:test:controller",
+  "delegate": "did:tsl:test:agent",
+  "effect": "allow",
+  "actions": [
+    "invoice.approve"
+  ],
+  "resources": [
+    "invoice:*"
+  ],
+  "constraints": {
+    "max_value_minor_units": 50000,
+    "requires_human_approval": false
+  },
+  "valid_from": "2026-05-25T00:00:00Z",
+  "valid_until": "2026-05-26T00:00:00Z",
+  "revocation_pointer": "did:tsl:test:controller#delegation-revocations",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+  "parent_policy_id": null,
+  "nonce": "0x8888888888888888888888888888888888888888888888888888888888888888"
+}

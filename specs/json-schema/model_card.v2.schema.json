@@ -1,0 +1,107 @@
+{
+  "$id": "https://spec.tsl.network/schemas/model_card.v2.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "model_id",
+    "provider",
+    "model_version",
+    "supported_domains",
+    "feature_registry_commitment",
+    "evaluation_report_commitment",
+    "privacy_report_commitment",
+    "metrics",
+    "limitations",
+    "issued_at",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.model_card.v2"
+    },
+    "model_id": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "model_version": {
+      "type": "string"
+    },
+    "supported_domains": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "feature_registry_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "evaluation_report_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "privacy_report_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "auroc_bps",
+        "auprc_bps",
+        "ece_bps",
+        "p95_latency_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "auroc_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "auprc_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "ece_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "sparse_identity_false_positive_rate_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "p95_latency_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "appeal_reversal_rate_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    }
+  }
+}

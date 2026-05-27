@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "evaluation_report.v1/promotion-pass",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.evaluation_report.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0xdacec91c28c34ebf83d4f46e28dc42a5210d6940b0b0cb78bd7a1e61b6445460",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

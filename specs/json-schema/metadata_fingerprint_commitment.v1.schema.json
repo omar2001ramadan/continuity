@@ -1,0 +1,68 @@
+{
+  "$id": "https://spec.tsl.network/schemas/metadata_fingerprint_commitment.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "subject",
+    "scope_class",
+    "scope_commitment",
+    "bucket_profile",
+    "fingerprint_commitment",
+    "created_at_bucket",
+    "expires_at",
+    "disclosure_policy",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.metadata_fingerprint_commitment.v1"
+    },
+    "subject": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "scope_class": {
+      "enum": [
+        "local_only",
+        "pairwise_verifier",
+        "provider_ephemeral",
+        "public_commitment"
+      ]
+    },
+    "scope_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "bucket_profile": {
+      "type": "string"
+    },
+    "fingerprint_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "salt_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "created_at_bucket": {
+      "type": "string"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "disclosure_policy": {
+      "enum": [
+        "local_only",
+        "selective",
+        "zk_only",
+        "public_commitment_only"
+      ]
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    }
+  }
+}

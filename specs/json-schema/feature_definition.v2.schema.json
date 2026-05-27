@@ -1,0 +1,115 @@
+{
+  "$id": "https://spec.tsl.network/schemas/feature_definition.v2.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "feature_id",
+    "name",
+    "family",
+    "value_type",
+    "unit",
+    "range",
+    "normalization_method",
+    "privacy_class",
+    "spoofing_cost_class",
+    "missing_value_policy",
+    "attack_notes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.feature_definition.v2"
+    },
+    "feature_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "family": {
+      "enum": [
+        "cryptographic",
+        "temporal",
+        "graph",
+        "receipts",
+        "attestations",
+        "behavioral_drift",
+        "adversarial_proximity",
+        "local_context",
+        "delegation"
+      ]
+    },
+    "value_type": {
+      "enum": [
+        "boolean",
+        "integer",
+        "bps",
+        "count",
+        "duration_ms",
+        "enum"
+      ]
+    },
+    "unit": {
+      "type": "string"
+    },
+    "range": {
+      "type": "object",
+      "required": [
+        "min",
+        "max"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "min": {
+          "type": "integer"
+        },
+        "max": {
+          "type": "integer"
+        }
+      }
+    },
+    "normalization_method": {
+      "enum": [
+        "identity",
+        "log1p_cap",
+        "winsorized_z",
+        "percentile_rank",
+        "piecewise_linear",
+        "binary"
+      ]
+    },
+    "privacy_class": {
+      "enum": [
+        "public",
+        "commitment",
+        "aggregate",
+        "pairwise",
+        "local_only",
+        "forbidden"
+      ]
+    },
+    "spoofing_cost_class": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "very_high"
+      ]
+    },
+    "missing_value_policy": {
+      "enum": [
+        "zero",
+        "neutral",
+        "abstain",
+        "domain_default",
+        "provider_default"
+      ]
+    },
+    "attack_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

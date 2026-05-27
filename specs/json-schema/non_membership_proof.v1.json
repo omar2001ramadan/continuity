@@ -1,0 +1,17 @@
+{
+  "$id": "https://spec.tsl.network/schemas/non_membership_proof.v1.json",
+  "type": "object",
+  "required": ["type", "claim", "subject", "set_root", "value_commitment", "proof", "issued_at"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.zk.non_membership_proof.v1" },
+    "claim": { "const": "revocation_set_non_membership" },
+    "subject": { "type": "string", "pattern": "^did:tsl:" },
+    "set_root": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "value_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "lower_neighbor": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "upper_neighbor": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "proof": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "issued_at": { "type": "string", "format": "date-time" }
+  }
+}

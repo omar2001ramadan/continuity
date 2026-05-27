@@ -1,0 +1,13 @@
+{
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "deployer": "0x38953ec02af3Ee73FBE06e16Ac0bc3af485D235E",
+  "checkpointRegistry": "0x6d2B5D3FD59AaB9d88a6b26Cb5Da262f31D0ec94",
+  "trustIDRegistry": "0xEB977ec197aC5546D5f768be3aE5C64FBC2B5083",
+  "revocationRegistry": "0x9Cc3e4a9b10ED0951626Ec44C281208AaDfeABf5",
+  "providerRegistry": "0xDa7703c4084916D989959d77D39314ef6cD456FE",
+  "governanceRegistry": "0x4b6eC8c7a457F4D2055d306Cae57d80FDF8DF343",
+  "authorizedRelays": [
+    "0xd7ed37e2bf220b4aea3b6e6299d6277222edd45bb0ec365b8f77179f3ef1b20a"
+  ]
+}

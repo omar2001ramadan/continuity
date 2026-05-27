@@ -1,0 +1,137 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tsl
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tsl-config
+  namespace: tsl
+data:
+  TSL_NETWORK: "base-sepolia"
+  TSL_EPOCH_MS: "300000"
+  TSL_SHARD_PREFIX_BITS: "16"
+  TSL_SETTLEMENT_BACKEND: "eip155:84532"
+  TSL_RELAY_ID: "did:tsl:relay:base-sepolia"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tsl-secrets
+  namespace: tsl
+type: Opaque
+stringData:
+  TSL_DATABASE_URL: "postgres://REPLACE"
+  TSL_QUEUE_URL: "redis://REPLACE"
+  TSL_SETTLEMENT_RPC_URL: "https://sepolia.base.org"
+  TSL_CHECKPOINT_REGISTRY_ADDRESS: "0xREPLACE"
+  TSL_RELAY_PRIVATE_KEY_URI: "kms:aws-kms:REPLACE"
+  TSL_AUDITOR_PRIVATE_KEY_URI: "kms:aws-kms:REPLACE"
+  TSL_PROVIDER_PRIVATE_KEY_URI: "kms:aws-kms:REPLACE"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tsl-db-migrate
+  namespace: tsl
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: tsl-runtime:REPLACE
+          command: ["npm", "run", "db:migrate"]
+          envFrom:
+            - configMapRef: { name: tsl-config }
+            - secretRef: { name: tsl-secrets }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tsl-relay-node
+  namespace: tsl
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: tsl-relay-node } }
+  template:
+    metadata: { labels: { app: tsl-relay-node } }
+    spec:
+      containers:
+        - name: relay-node
+          image: tsl-runtime:REPLACE
+          command: ["npm", "run", "relay"]
+          ports: [{ containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /health, port: 8080 } }
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+          envFrom:
+            - configMapRef: { name: tsl-config }
+            - secretRef: { name: tsl-secrets }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tsl-log-node
+  namespace: tsl
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: tsl-log-node } }
+  template:
+    metadata: { labels: { app: tsl-log-node } }
+    spec:
+      containers:
+        - name: log-node
+          image: tsl-runtime:REPLACE
+          command: ["npm", "run", "log"]
+          ports: [{ containerPort: 8081 }]
+          readinessProbe: { httpGet: { path: /health, port: 8081 } }
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+          envFrom:
+            - configMapRef: { name: tsl-config }
+            - secretRef: { name: tsl-secrets }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tsl-verifier-api
+  namespace: tsl
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: tsl-verifier-api } }
+  template:
+    metadata: { labels: { app: tsl-verifier-api } }
+    spec:
+      containers:
+        - name: verifier-api
+          image: tsl-runtime:REPLACE
+          command: ["npm", "run", "verifier"]
+          ports: [{ containerPort: 8083 }]
+          readinessProbe: { httpGet: { path: /v1/release/health, port: 8083 } }
+          envFrom:
+            - configMapRef: { name: tsl-config }
+            - secretRef: { name: tsl-secrets }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tsl-auditor-node
+  namespace: tsl
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: tsl-auditor-node } }
+  template:
+    metadata: { labels: { app: tsl-auditor-node } }
+    spec:
+      containers:
+        - name: auditor-node
+          image: tsl-runtime:REPLACE
+          command: ["npm", "run", "auditor"]
+          ports: [{ containerPort: 8085 }]
+          envFrom:
+            - configMapRef: { name: tsl-config }
+            - secretRef: { name: tsl-secrets }

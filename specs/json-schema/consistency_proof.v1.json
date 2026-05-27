@@ -1,0 +1,28 @@
+{
+  "$id": "https://spec.tsl.network/schemas/consistency_proof.v1.json",
+  "type": "object",
+  "required": ["type", "shard", "from_checkpoint", "to_checkpoint", "chain"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.consistency_proof.v1" },
+    "shard": { "type": "string" },
+    "from_checkpoint": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "to_checkpoint": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "chain": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["checkpoint_hash", "previous_checkpoint", "epoch_start_ms"],
+        "additionalProperties": false,
+        "properties": {
+          "checkpoint_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+          "previous_checkpoint": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+          "epoch_start_ms": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "auditor": { "type": "string", "pattern": "^did:tsl:" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

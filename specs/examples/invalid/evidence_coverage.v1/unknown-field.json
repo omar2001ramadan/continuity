@@ -1,0 +1,22 @@
+{
+  "type": "tsl.evidence_coverage.v1",
+  "subject": "did:tsl:test:alice",
+  "computed_at": "2026-05-25T00:00:00Z",
+  "coverage_bps": 8800,
+  "required_evidence": [
+    "signature",
+    "key_state",
+    "receipts",
+    "attestations"
+  ],
+  "present_evidence": [
+    "signature",
+    "key_state",
+    "receipts"
+  ],
+  "missing_evidence": [
+    "attestations"
+  ],
+  "evidence_commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "platform": "gmail"
+}

@@ -1,0 +1,15 @@
+node_modules/
+.DS_Store
+.pytest_cache/
+packages/core-rust/target/
+contracts/artifacts/
+contracts/cache/
+deployments/local.json
+.env
+docs/*.aux
+docs/*.fdb_latexmk
+docs/*.fls
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.synctex.gz

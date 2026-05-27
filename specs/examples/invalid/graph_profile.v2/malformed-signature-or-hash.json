@@ -1,0 +1,24 @@
+{
+  "type": "bad",
+  "profile_id": "graph-default-2026-05",
+  "edge_weight_profile": "default-v0",
+  "temporal_decay_profile": "half-life-180d",
+  "community_detection": {
+    "algorithm": "connected_components",
+    "resolution_bps": 10000,
+    "min_cluster_size": 2,
+    "edge_weight_floor_bps": 100
+  },
+  "seed_sets": {
+    "trusted_seed_commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "adversarial_seed_commitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "negative_edge_policy": "disputes-reduce-receipt-weight",
+  "privacy_policy": "aggregate-only",
+  "edge_weights": {
+    "signed_event": 1000,
+    "received": 2000,
+    "completed": 3000,
+    "delegation": 1500
+  }
+}

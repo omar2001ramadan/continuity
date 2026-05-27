@@ -1,0 +1,37 @@
+{
+  "$id": "https://spec.tsl.network/schemas/batch_checkpoint.v1.json",
+  "type": "object",
+  "required": [
+    "type",
+    "epoch_start_ms",
+    "epoch_duration_ms",
+    "shard",
+    "event_root",
+    "receipt_root",
+    "attestation_root",
+    "revocation_root",
+    "event_count",
+    "receipt_count",
+    "previous_checkpoint",
+    "relay_id",
+    "relay_signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.batch_checkpoint.v1" },
+    "epoch_start_ms": { "type": "integer", "minimum": 0 },
+    "epoch_duration_ms": { "type": "integer", "minimum": 1 },
+    "shard": { "type": "string", "pattern": "^[0-9a-f]{4,16}$" },
+    "event_root": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "receipt_root": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "attestation_root": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "revocation_root": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "event_count": { "type": "integer", "minimum": 0 },
+    "receipt_count": { "type": "integer", "minimum": 0 },
+    "previous_checkpoint": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "settlement_backend": { "type": "string" },
+    "settlement_tx": { "type": "string" },
+    "relay_id": { "type": "string", "pattern": "^did:tsl:" },
+    "relay_signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

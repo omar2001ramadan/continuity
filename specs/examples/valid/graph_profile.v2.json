@@ -1,0 +1,32 @@
+{
+  "type": "tsl.graph_profile.v2",
+  "profile_id": "graph-default-2026-05",
+  "edge_weight_profile": "default-v0",
+  "temporal_decay_profile": "half-life-180d",
+  "community_detection": {
+    "algorithm": "connected_components",
+    "resolution_bps": 10000,
+    "min_cluster_size": 2,
+    "edge_weight_floor_bps": 100
+  },
+  "seed_sets": {
+    "trusted_seed_commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "adversarial_seed_commitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "negative_edge_policy": {
+    "requires_evidence_commitment": true,
+    "requires_appeal_uri": true,
+    "max_single_negative_weight_bps": 1500,
+    "decay_days": 30
+  },
+  "privacy_policy": {
+    "raw_counterparty_upload_required": false,
+    "allows_pairwise_private_features": true
+  },
+  "edge_weights": {
+    "signed_event": 1000,
+    "received": 2000,
+    "completed": 3000,
+    "delegation": 1500
+  }
+}

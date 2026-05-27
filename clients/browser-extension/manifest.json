@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "TSL Proof Detector",
+  "version": "0.1.0",
+  "description": "Detects TSL proof links and opens the local web verifier.",
+  "permissions": ["contextMenus", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "TSL Verifier",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

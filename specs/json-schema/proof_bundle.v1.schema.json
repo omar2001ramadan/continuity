@@ -1,0 +1,114 @@
+{
+  "$id": "https://spec.tsl.network/schemas/proof_bundle.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "bundle_id",
+    "created_at",
+    "envelope",
+    "proof",
+    "checkpoint",
+    "identity",
+    "redaction_manifest"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.proof_bundle.v1"
+    },
+    "bundle_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "envelope": {
+      "type": "object"
+    },
+    "proof": {
+      "type": "object"
+    },
+    "checkpoint": {
+      "type": "object"
+    },
+    "identity": {
+      "type": "object"
+    },
+    "receipts": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "attestations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "revocations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "assessment": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "assessment_v2": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "zk_proofs": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "delegations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "audit_findings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "governance_policy": {
+      "type": "object"
+    },
+    "redaction_manifest": {
+      "type": "object",
+      "required": [
+        "raw_content_included",
+        "exact_counterparties_included",
+        "metadata_fields_redacted"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "raw_content_included": {
+          "type": "boolean"
+        },
+        "exact_counterparties_included": {
+          "type": "boolean"
+        },
+        "metadata_fields_redacted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

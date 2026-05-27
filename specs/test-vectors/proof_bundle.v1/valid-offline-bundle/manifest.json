@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "proof_bundle.v1/valid-offline-bundle",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.proof_bundle.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0xb1263d48731d0cb75449702bf69e1429d6a7495647126a8c457dabfd5648e8e4",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

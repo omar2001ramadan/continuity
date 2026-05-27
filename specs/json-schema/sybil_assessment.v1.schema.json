@@ -1,0 +1,109 @@
+{
+  "$id": "https://spec.tsl.network/schemas/sybil_assessment.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "subject",
+    "cluster_id_commitment",
+    "computed_at",
+    "adversary_tier_assumed",
+    "cluster_concentration_bps",
+    "trusted_escape_bps",
+    "internal_receipt_ratio_bps",
+    "attack_cost_minor_units",
+    "risk_score_bps",
+    "risk_label",
+    "privacy_level",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.sybil_assessment.v1"
+    },
+    "subject": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "cluster_id_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "computed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "adversary_tier_assumed": {
+      "enum": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ]
+    },
+    "cluster_size_bucket": {
+      "type": "string"
+    },
+    "cluster_concentration_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "trusted_escape_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "internal_receipt_ratio_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "creation_sync_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "issuer_reuse_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "external_diversity_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "attack_cost_minor_units": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "risk_score_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "risk_label": {
+      "enum": [
+        "low",
+        "medium",
+        "elevated",
+        "high",
+        "insufficient_evidence"
+      ]
+    },
+    "privacy_level": {
+      "enum": [
+        "cluster_commitment_only",
+        "aggregate_only",
+        "local_only"
+      ]
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    }
+  }
+}

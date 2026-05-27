@@ -1,0 +1,16 @@
+{
+  "type": "tsl.graph_feature_vector.v1",
+  "subject": "did:tsl:test:alice",
+  "graph_profile_id": "graph-default-2026-05",
+  "computed_at": "2026-05-25T00:00:00Z",
+  "weighted_degree_bps": 4000,
+  "reciprocity_bps": 5000,
+  "counterparty_hhi_bps": 3750,
+  "counterparty_entropy_bps": 6250,
+  "effective_counterparty_count_milli": 3000,
+  "seed_escape_bps": 2500,
+  "adversarial_proximity_bps": 420,
+  "privacy_disclosure_level": "aggregate_only",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+  "unexpected_field": true
+}

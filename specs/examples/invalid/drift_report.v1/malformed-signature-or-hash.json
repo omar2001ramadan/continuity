@@ -1,0 +1,15 @@
+{
+  "type": "tsl.drift_report.v1",
+  "subject": "did:tsl:test:alice",
+  "computed_at": "2026-05-25T00:00:00Z",
+  "baseline_window_days": 90,
+  "observation_window_days": 7,
+  "drift_score_bps": 8500,
+  "drift_label": "dormant_reactivation",
+  "action": "step_up",
+  "reason_codes": [
+    "DORMANT_REACTIVATION",
+    "NEW_HIGH_VALUE_ACTION"
+  ],
+  "signature": "not-a-signature"
+}

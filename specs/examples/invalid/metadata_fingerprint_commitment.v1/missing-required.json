@@ -1,0 +1,12 @@
+{
+  "type": "tsl.metadata_fingerprint_commitment.v1",
+  "scope_class": "pairwise_verifier",
+  "scope_commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "bucket_profile": "hourly-counts-v0",
+  "fingerprint_commitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "salt_commitment": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "created_at_bucket": "2026-05-25T00",
+  "expires_at": "2026-05-26T00:00:00Z",
+  "disclosure_policy": "selective",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+}

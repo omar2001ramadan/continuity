@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>TSL Verifier</title>
+    <style>
+      body {
+        min-width: 280px;
+        margin: 0;
+        font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #172033;
+      }
+      main {
+        padding: 12px;
+      }
+      button {
+        width: 100%;
+        border: 1px solid #b8c4d8;
+        background: #f6f8fc;
+        border-radius: 6px;
+        padding: 8px;
+        font: inherit;
+        cursor: pointer;
+      }
+      textarea {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 86px;
+        margin: 8px 0;
+        resize: vertical;
+      }
+      .muted {
+        color: #536075;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <strong>TSL Verifier</strong>
+      <p class="muted">Open a proof link in the local verifier. Disclose raw messages only when you intend to reveal them.</p>
+      <textarea id="proof" placeholder="Paste tsl://proof/... or https://.../p/..."></textarea>
+      <button id="open">Open verifier</button>
+      <p id="status" class="muted"></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

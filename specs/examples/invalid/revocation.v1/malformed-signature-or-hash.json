@@ -1,0 +1,9 @@
+{
+  "type": "tsl.revocation.v1",
+  "trust_id": "did:tsl:test:alice",
+  "revoked_key": "#old-key",
+  "replacement_key": "#test-key-1",
+  "reason_class": "compromise",
+  "effective_at": "2026-05-25T00:03:00Z",
+  "signature": "not-valid"
+}

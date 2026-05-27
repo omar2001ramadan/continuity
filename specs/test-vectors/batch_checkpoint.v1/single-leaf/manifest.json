@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "batch_checkpoint.v1/single-leaf",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.batch_checkpoint.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0x0da961fe69aa539da0f70a6df0f5f2b62b65f5986018ba7d94af321fd5c345d6",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

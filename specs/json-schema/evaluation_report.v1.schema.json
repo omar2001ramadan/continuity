@@ -1,0 +1,108 @@
+{
+  "$id": "https://spec.tsl.network/schemas/evaluation_report.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "report_id",
+    "model_id",
+    "domain",
+    "dataset_commitments",
+    "metrics",
+    "promotion_gate_result",
+    "red_team_result",
+    "issued_at",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.evaluation_report.v1"
+    },
+    "report_id": {
+      "type": "string"
+    },
+    "model_id": {
+      "type": "string"
+    },
+    "domain": {
+      "type": "string"
+    },
+    "dataset_commitments": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^0x[0-9a-f]{64}$"
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "auroc_bps",
+        "auprc_bps",
+        "ece_bps",
+        "coverage_bps",
+        "p95_latency_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "auroc_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "auprc_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "ece_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "coverage_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "sparse_identity_fpr_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "privacy_leakage_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "p95_latency_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "promotion_gate_result": {
+      "enum": [
+        "pass",
+        "fail",
+        "conditional",
+        "research_only"
+      ]
+    },
+    "red_team_result": {
+      "enum": [
+        "pass",
+        "fail",
+        "not_run"
+      ]
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "type": "tsl.base_sepolia.deployment_report.v1",
+  "generated_at": "2026-05-26T03:37:24.956Z",
+  "chain_id": 84532,
+  "configured_chain_id": 84532,
+  "checkpoint_registry": "0x6d2B5D3FD59AaB9d88a6b26Cb5Da262f31D0ec94",
+  "relay_id": "did:tsl:relay:base-sepolia",
+  "checkpoint_hash": "0x8b2bc8aeca1ca617c9afc6d89f2edb4f9b099b1ef205e0b9a6fd86c7bc7eac4c",
+  "settlement_tx": "0x839a91ed24b8b1e9899afb02592c14bdce8c7687954f735ff1ce65104f2322b7",
+  "verification": {
+    "verified": true,
+    "commitment_hash": "0x6b22e4005dbeea40e3e10007e609e18dc0f257ffa91e0aa42e4be50098ab734b",
+    "event_hash": "0x9224666b9102325b49664cdf5a10829217154e82dffb655a5fc17970c2699ab4",
+    "checks": {
+      "schema_valid": true,
+      "signature_valid": true,
+      "key_found": true,
+      "key_active": true,
+      "not_revoked": true,
+      "included_in_log": true,
+      "checkpoint_valid": true,
+      "checkpoint_matches_proof": true,
+      "checkpoint_settled": true
+    },
+    "settlement_status": "settled",
+    "risk_label": "not_assessed",
+    "explanation": [
+      "Signature valid",
+      "Key active at event timestamp",
+      "No active key revocation in resolved identity state",
+      "Event included in Merkle log proof",
+      "Checkpoint root matches inclusion proof",
+      "Checkpoint is settled in configured settlement backend"
+    ],
+    "errors": []
+  }
+}

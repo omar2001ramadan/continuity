@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "trust_assessment.v2/likely-trusted",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.trust_assessment.v2",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0x94a9baeccd020e203b0c6ba514180f5809aa017393b7f472ad391794a10b5ca5",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

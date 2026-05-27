@@ -1,0 +1,35 @@
+{
+  "$id": "https://spec.tsl.network/schemas/audit_finding.v1.json",
+  "type": "object",
+  "required": [
+    "type",
+    "auditor",
+    "finding_class",
+    "severity",
+    "evidence_commitment",
+    "issued_at",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.audit.finding.v1" },
+    "auditor": { "type": "string", "pattern": "^did:tsl:" },
+    "checkpoint_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "epoch_start_ms": { "type": "integer", "minimum": 0 },
+    "shard": { "type": "string" },
+    "finding_class": {
+      "enum": [
+        "checkpoint_valid",
+        "checkpoint_conflict",
+        "previous_checkpoint_broken",
+        "settlement_mismatch",
+        "settlement_missing",
+        "root_mismatch"
+      ]
+    },
+    "severity": { "enum": ["info", "warning", "critical"] },
+    "evidence_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

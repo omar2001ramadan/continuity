@@ -1,0 +1,79 @@
+{
+  "$id": "https://spec.tsl.network/schemas/evidence_coverage.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "subject",
+    "computed_at",
+    "valid_signed_event_count",
+    "valid_receipt_count",
+    "unique_counterparty_count",
+    "distinct_community_count",
+    "attestation_count",
+    "recent_revocation_count",
+    "coverage_bps",
+    "coverage_label",
+    "missing_evidence"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.evidence_coverage.v1"
+    },
+    "subject": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "computed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "valid_signed_event_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "valid_receipt_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "unique_counterparty_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "distinct_community_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "attestation_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "recent_revocation_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "coverage_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "coverage_label": {
+      "enum": [
+        "insufficient",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "missing_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    }
+  }
+}

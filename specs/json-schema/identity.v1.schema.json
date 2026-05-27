@@ -1,0 +1,31 @@
+{
+  "$id": "https://spec.tsl.network/schemas/identity.v1.json",
+  "type": "object",
+  "required": ["type", "id", "controller", "created_at", "verification_methods"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.identity.v1" },
+    "id": { "type": "string", "pattern": "^did:tsl:" },
+    "controller": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "verification_methods": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "public_key", "status", "created_at"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "enum": ["ed25519", "secp256k1", "smart_account"] },
+          "public_key": { "type": "string" },
+          "status": { "enum": ["active", "revoked", "expired"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "recovery": { "type": "object" },
+    "privacy_policy_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" }
+  }
+}

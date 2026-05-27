@@ -1,0 +1,18 @@
+{
+  "type": "tsl.feature_definition.v2",
+  "name": "Identity Age Days",
+  "family": "temporal",
+  "value_type": "count",
+  "unit": "days",
+  "range": {
+    "min": 0,
+    "max": 3650
+  },
+  "normalization_method": "log1p_cap",
+  "privacy_class": "aggregate",
+  "spoofing_cost_class": "high",
+  "missing_value_policy": "zero",
+  "attack_notes": [
+    "New identities cannot cheaply fake age."
+  ]
+}

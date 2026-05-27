@@ -1,0 +1,11 @@
+{
+  "type": "tsl.event_commitment.v1",
+  "event_class": "message",
+  "sender": "did:tsl:test:alice",
+  "signing_key_id": "#test-key-1",
+  "content_commitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "timestamp": "2026-05-25T00:01:00Z",
+  "nonce": "0x2222222222222222222222222222222222222222222222222222222222222222",
+  "disclosure_policy": "commitment_only",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+}

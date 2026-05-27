@@ -1,0 +1,56 @@
+openapi: 3.1.0
+info:
+  title: TSL Relay API
+  version: 0.1.0
+paths:
+  /v1/identity/create:
+    post:
+      summary: Register a local TrustID document.
+      responses:
+        "200": { description: Identity accepted }
+  /v1/commitments:
+    post:
+      summary: Submit an event commitment.
+      responses:
+        "200": { description: Event accepted }
+  /v1/receipts:
+    post:
+      summary: Submit a receipt commitment.
+      responses:
+        "200": { description: Receipt accepted }
+  /v1/attestations:
+    post:
+      summary: Submit a signed attestation.
+      responses:
+        "200": { description: Attestation accepted }
+  /v1/keys/revoke:
+    post:
+      summary: Submit a signed revocation event.
+      responses:
+        "200": { description: Revocation accepted }
+  /v1/keys/rotate:
+    post:
+      summary: Submit a signed rotation revocation with replacement key.
+      responses:
+        "200": { description: Rotation accepted }
+  /v1/proofs/{commitment}:
+    get:
+      summary: Fetch a portable proof bundle.
+      responses:
+        "200": { description: Proof bundle }
+  /v1/proof-bundles/{bundleId}:
+    get:
+      summary: Fetch a portable proof bundle by bundle ID or commitment hash.
+      responses:
+        "200": { description: Proof bundle }
+  /v1/proofs/{treeKind}/{commitment}:
+    get:
+      summary: Fetch an inclusion proof and checkpoint.
+      responses:
+        "200": { description: Inclusion proof and checkpoint }
+  /v1/delegations/verify:
+    post:
+      summary: Verify delegated agent action under disclosed delegation policies.
+      responses:
+        "200": { description: Delegation is inside scope }
+        "422": { description: Delegation is missing or outside scope }

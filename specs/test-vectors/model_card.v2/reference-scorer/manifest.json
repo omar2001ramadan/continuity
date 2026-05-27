@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "model_card.v2/reference-scorer",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.model_card.v2",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0xf6165a508e5954454ff939672ca672d9fc7cad5a1a374fc60df86e763c8248a4",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

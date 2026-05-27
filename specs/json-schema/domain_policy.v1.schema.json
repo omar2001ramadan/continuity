@@ -1,0 +1,108 @@
+{
+  "$id": "https://spec.tsl.network/schemas/domain_policy.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "domain",
+    "policy_version",
+    "requires_settlement",
+    "min_coverage_bps",
+    "max_assessment_age_seconds",
+    "false_positive_cost_class",
+    "false_negative_cost_class",
+    "sparse_identity_default",
+    "thresholds"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.domain_policy.v1"
+    },
+    "domain": {
+      "type": "string"
+    },
+    "policy_version": {
+      "type": "string"
+    },
+    "requires_settlement": {
+      "type": "boolean"
+    },
+    "requires_delegation_check": {
+      "type": "boolean"
+    },
+    "requires_content_opening": {
+      "type": "boolean"
+    },
+    "min_coverage_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "max_assessment_age_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "false_positive_cost_class": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "false_negative_cost_class": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "sparse_identity_default": {
+      "enum": [
+        "unknown",
+        "unknown_caution",
+        "require_step_up",
+        "deny_high_value_action"
+      ]
+    },
+    "thresholds": {
+      "type": "object",
+      "required": [
+        "trusted_bps",
+        "likely_trusted_bps",
+        "medium_bps",
+        "suspicious_bps",
+        "high_risk_bps"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "trusted_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "likely_trusted_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "medium_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "suspicious_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "high_risk_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    }
+  }
+}

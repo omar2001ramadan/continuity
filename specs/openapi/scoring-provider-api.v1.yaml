@@ -1,0 +1,50 @@
+openapi: 3.1.0
+info:
+  title: TSL Scoring Provider API
+  version: 0.1.0
+paths:
+  /v1/assessments:
+    post:
+      summary: Request or submit a signed trust assessment.
+      responses:
+        "200": { description: Assessment accepted }
+  /v1/assessments/v2:
+    post:
+      summary: Request or submit a signed TrustAssessmentV2.
+      responses:
+        "200": { description: V2 assessment accepted }
+        "422": { description: V2 assessment validation failed }
+  /v1/scoring-profiles/{profileId}:
+    get:
+      summary: Fetch a signed scoring profile.
+      responses:
+        "200": { description: Scoring profile }
+  /v1/model-cards/{modelId}:
+    get:
+      summary: Fetch a signed model card.
+      responses:
+        "200": { description: Model card }
+  /v1/scoring/profiles:
+    get:
+      summary: List active scoring profiles.
+      responses:
+        "200": { description: Scoring profiles }
+    post:
+      summary: Submit a signed scoring_profile.v2 object.
+      responses:
+        "200": { description: Scoring profile accepted }
+  /v1/scoring/model-cards:
+    post:
+      summary: Submit a signed model_card.v2 and linked evaluation report commitment.
+      responses:
+        "200": { description: Model card accepted }
+  /v1/graph/features:
+    post:
+      summary: Compute or submit graph, Sybil, and drift artifacts.
+      responses:
+        "200": { description: Graph artifacts accepted }
+  /v1/metadata-fingerprints:
+    post:
+      summary: Submit a metadata_fingerprint_commitment.v1 without raw metadata.
+      responses:
+        "200": { description: Metadata fingerprint commitment accepted }

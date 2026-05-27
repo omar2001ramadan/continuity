@@ -1,0 +1,72 @@
+{
+  "$id": "https://spec.tsl.network/schemas/drift_report.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "subject",
+    "computed_at",
+    "baseline_window_days",
+    "observation_window_days",
+    "drift_score_bps",
+    "drift_label",
+    "action",
+    "reason_codes",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.drift_report.v1"
+    },
+    "subject": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "computed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "baseline_window_days": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "observation_window_days": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "drift_score_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "drift_label": {
+      "enum": [
+        "stable",
+        "minor",
+        "moderate",
+        "severe",
+        "dormant_reactivation",
+        "insufficient_baseline"
+      ]
+    },
+    "action": {
+      "enum": [
+        "none",
+        "lower_confidence",
+        "step_up",
+        "human_review",
+        "temporary_block"
+      ]
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    }
+  }
+}

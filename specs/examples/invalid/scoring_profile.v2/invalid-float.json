@@ -1,0 +1,20 @@
+{
+  "type": "tsl.scoring_profile.v2",
+  "profile_id": "did:tsl:provider:continuity-labs/profile/anti-phishing-v2.1.0",
+  "provider": "did:tsl:provider:continuity-labs",
+  "domain": "anti_phishing",
+  "model_family": "transparent_weighted_logistic",
+  "model_version": "2.1.0",
+  "feature_registry_commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "normalization_profile_commitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "weight_profile_commitment": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "calibration_profile_commitment": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "threshold_policy_commitment": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "privacy_policy_commitment": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "evaluation_report_commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "issued_at": "2026-05-25T00:00:00Z",
+  "valid_after": "2026-05-25T00:00:00Z",
+  "expires_at": "2026-08-25T00:00:00Z",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+  "weight_bps": 0.5
+}

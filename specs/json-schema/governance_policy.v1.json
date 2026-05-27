@@ -1,0 +1,31 @@
+{
+  "$id": "https://spec.tsl.network/schemas/governance_policy.v1.json",
+  "type": "object",
+  "required": [
+    "type",
+    "policy_id",
+    "authority",
+    "authority_key_id",
+    "protocol_schema_commitment",
+    "provider_rules_commitment",
+    "appeal_policy_commitment",
+    "emergency_pause",
+    "issued_at",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.governance_policy.v1" },
+    "policy_id": { "type": "string" },
+    "authority": { "type": "string", "pattern": "^did:tsl:" },
+    "authority_key_id": { "type": "string" },
+    "protocol_schema_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "provider_rules_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "appeal_policy_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "model_card_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "emergency_pause": { "type": "boolean" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

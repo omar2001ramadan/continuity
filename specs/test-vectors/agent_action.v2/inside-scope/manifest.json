@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "agent_action.v2/inside-scope",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.agent_action.v2",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0xab05c48b4a1a03f69827e79a3619db232f9680a637635207536dc3f0c2b5339a",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

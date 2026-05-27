@@ -1,0 +1,11 @@
+openapi: 3.1.0
+info:
+  title: TSL Verifier API
+  version: 0.1.0
+paths:
+  /v1/verify:
+    post:
+      summary: Verify protocol proof material using the pure verifier library.
+      responses:
+        "200": { description: Verified }
+        "422": { description: Verification failed }

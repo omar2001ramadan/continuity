@@ -1,0 +1,20 @@
+{
+  "type": "tsl.attestation.v2",
+  "attestation_id": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "issuer": "did:tsl:provider:continuity-labs",
+  "subject": "did:tsl:test:alice",
+  "claim_class": "provider_risk_flag",
+  "claim_polarity": "negative",
+  "severity": "medium",
+  "claim_commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "evidence_commitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "evidence_policy": "selective_disclosure_or_auditor_review",
+  "visibility": "public",
+  "appeal_uri": "https://appeals.tsl.example/att/1",
+  "issued_at": "2026-05-25T00:00:00Z",
+  "valid_after": "2026-05-25T00:00:00Z",
+  "expires_at": "2026-06-25T00:00:00Z",
+  "revocation_pointer": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "appeal_status": "submitted",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+}

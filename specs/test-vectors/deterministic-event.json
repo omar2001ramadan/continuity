@@ -1,0 +1,12 @@
+{
+  "private_key_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "content_salt_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+  "content_message_utf8": "hello-tsl",
+  "content_commitment_hex": "0x50f62d6063e0d92d02fd4fdafb4b10c38bf271ebb5e14afd037d35b0b35f6b95",
+  "canonical_unsigned_event": "{\"content_commitment\":\"0x50f62d6063e0d92d02fd4fdafb4b10c38bf271ebb5e14afd037d35b0b35f6b95\",\"disclosure_policy\":\"commitment_only\",\"event_class\":\"message\",\"nonce\":\"0x2222222222222222222222222222222222222222222222222222222222222222\",\"sender\":\"did:tsl:test:alice\",\"signing_key_id\":\"#test-key-1\",\"timestamp\":\"2026-05-25T00:01:00Z\",\"type\":\"tsl.event_commitment.v1\"}",
+  "event_hash_hex": "0xcf5cb36e4596ed4c446f2d24504407369a1fc4862928e86c340ec5270fcc3267",
+  "signature_hex": "0xd3187ac9861b87a3b5f871c9ae9a6426ce0c1e49cee1978c767bf99eff6c94467b6955cd9821c2a7e3bfcf945b576e49d81deccb4e7c8b0624917fd794f1ff08",
+  "commitment_hash_hex": "0x174c377613f1fa94acc95d32408095c27330f5dfa088ee40cdcb81a503b25bb5",
+  "single_leaf_merkle_root_hex": "0xc09632a2beaaf0c4702e673a7a1661673c80be478f1136b60677f38c5bb5914f"
+}

@@ -1,0 +1,10 @@
+[package]
+name = "tsl-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ed25519-dalek = "2"
+hex = "0.4"
+serde_json = "1"
+sha2 = "0.10"

@@ -1,0 +1,16 @@
+{
+  "type": "tsl.agent_action.v2",
+  "action_id": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "agent": "did:tsl:test:agent",
+  "principal": "did:tsl:test:controller",
+  "action": "invoice.approve",
+  "resource": "invoice:123",
+  "tool": "invoice_api",
+  "parameters_commitment": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "parameter_disclosure_policy": "selective",
+  "delegation_chain_root": "not-valid",
+  "value_minor_units": 40000,
+  "issued_at": "2026-05-25T01:00:00Z",
+  "nonce": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+}

@@ -1,0 +1,15 @@
+{
+  "$id": "https://spec.tsl.network/schemas/revocation.v1.json",
+  "type": "object",
+  "required": ["type", "trust_id", "revoked_key", "reason_class", "effective_at", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.revocation.v1" },
+    "trust_id": { "type": "string", "pattern": "^did:tsl:" },
+    "revoked_key": { "type": "string" },
+    "replacement_key": { "type": "string" },
+    "reason_class": { "enum": ["rotation", "compromise", "device_loss", "policy_update"] },
+    "effective_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

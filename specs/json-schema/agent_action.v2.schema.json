@@ -1,0 +1,79 @@
+{
+  "$id": "https://spec.tsl.network/schemas/agent_action.v2.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "action_id",
+    "agent",
+    "principal",
+    "action",
+    "resource",
+    "parameters_commitment",
+    "delegation_chain_root",
+    "issued_at",
+    "nonce",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.agent_action.v2"
+    },
+    "action_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "agent": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "principal": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "action": {
+      "type": "string"
+    },
+    "resource": {
+      "type": "string"
+    },
+    "tool": {
+      "type": "string"
+    },
+    "parameters_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "parameter_disclosure_policy": {
+      "enum": [
+        "commitment_only",
+        "selective",
+        "zk_only",
+        "public"
+      ]
+    },
+    "delegation_chain_root": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "value_minor_units": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "human_approval_proof": {
+      "type": "string"
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    }
+  }
+}

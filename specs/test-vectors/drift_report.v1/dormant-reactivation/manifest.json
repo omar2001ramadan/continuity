@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "drift_report.v1/dormant-reactivation",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.drift_report.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0x34da743ccd601faeaf377d498e90fd7ca8e4af6a20c0ba80a320918dd9cc4164",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "evidence_coverage.v1/high-coverage",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.evidence_coverage.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0x141302b775fb44cd65902c516c6c53e38a88034e8f51e8729c2b536da2bea090",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

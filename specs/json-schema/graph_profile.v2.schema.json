@@ -1,0 +1,130 @@
+{
+  "$id": "https://spec.tsl.network/schemas/graph_profile.v2.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "profile_id",
+    "edge_weight_profile",
+    "temporal_decay_profile",
+    "community_detection",
+    "seed_sets",
+    "negative_edge_policy",
+    "privacy_policy"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.graph_profile.v2"
+    },
+    "profile_id": {
+      "type": "string"
+    },
+    "edge_weight_profile": {
+      "type": "string"
+    },
+    "temporal_decay_profile": {
+      "type": "string"
+    },
+    "community_detection": {
+      "type": "object",
+      "required": [
+        "algorithm",
+        "resolution_bps",
+        "min_cluster_size"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "enum": [
+            "leiden",
+            "louvain",
+            "connected_components",
+            "none"
+          ]
+        },
+        "resolution_bps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "min_cluster_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "edge_weight_floor_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "seed_sets": {
+      "type": "object",
+      "required": [
+        "trusted_seed_commitment",
+        "adversarial_seed_commitment"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "trusted_seed_commitment": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        },
+        "adversarial_seed_commitment": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        }
+      }
+    },
+    "negative_edge_policy": {
+      "type": "object",
+      "required": [
+        "requires_evidence_commitment",
+        "requires_appeal_uri",
+        "max_single_negative_weight_bps",
+        "decay_days"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "requires_evidence_commitment": {
+          "type": "boolean"
+        },
+        "requires_appeal_uri": {
+          "type": "boolean"
+        },
+        "max_single_negative_weight_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "decay_days": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "privacy_policy": {
+      "type": "object",
+      "required": [
+        "raw_counterparty_upload_required",
+        "allows_pairwise_private_features"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "raw_counterparty_upload_required": {
+          "type": "boolean"
+        },
+        "allows_pairwise_private_features": {
+          "type": "boolean"
+        }
+      }
+    },
+    "edge_weights": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10000
+      }
+    }
+  }
+}

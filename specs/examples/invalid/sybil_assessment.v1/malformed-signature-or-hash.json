@@ -1,0 +1,19 @@
+{
+  "type": "tsl.sybil_assessment.v1",
+  "subject": "did:tsl:test:alice",
+  "cluster_id_commitment": "not-valid",
+  "computed_at": "2026-05-25T00:00:00Z",
+  "adversary_tier_assumed": "B2",
+  "cluster_size_bucket": "100-500",
+  "cluster_concentration_bps": 9000,
+  "trusted_escape_bps": 400,
+  "internal_receipt_ratio_bps": 8200,
+  "creation_sync_bps": 900,
+  "issuer_reuse_bps": 300,
+  "external_diversity_bps": 6900,
+  "attack_cost_minor_units": 125000,
+  "risk_score_bps": 8933,
+  "risk_label": "high",
+  "privacy_level": "cluster_commitment_only",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+}

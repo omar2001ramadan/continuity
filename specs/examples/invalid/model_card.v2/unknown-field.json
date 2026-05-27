@@ -1,0 +1,19 @@
+{
+  "type": "tsl.model_card.v2",
+  "model_id": "reference-scorer-v0",
+  "provider": "did:tsl:provider:continuity-labs",
+  "model_version": "0.1.0",
+  "supported_domains": [
+    "anti_phishing",
+    "agent_delegation"
+  ],
+  "feature_registry_commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "evaluation_report_commitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "privacy_report_commitment": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "limitations": [
+    "Reference transparent scorer; not a fraud oracle."
+  ],
+  "issued_at": "2026-05-25T00:00:00Z",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+  "platform": "gmail"
+}

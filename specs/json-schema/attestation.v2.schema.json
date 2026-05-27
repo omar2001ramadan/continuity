@@ -1,0 +1,116 @@
+{
+  "$id": "https://spec.tsl.network/schemas/attestation.v2.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "attestation_id",
+    "issuer",
+    "subject",
+    "claim_class",
+    "claim_polarity",
+    "severity",
+    "claim_commitment",
+    "evidence_commitment",
+    "evidence_policy",
+    "visibility",
+    "appeal_uri",
+    "issued_at",
+    "valid_after",
+    "expires_at",
+    "revocation_pointer",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.attestation.v2"
+    },
+    "attestation_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "issuer": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "subject": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "claim_class": {
+      "type": "string"
+    },
+    "claim_polarity": {
+      "enum": [
+        "positive",
+        "negative",
+        "neutral"
+      ]
+    },
+    "severity": {
+      "enum": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "claim_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "evidence_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "evidence_policy": {
+      "enum": [
+        "public",
+        "selective_disclosure_or_auditor_review",
+        "private_commitment",
+        "zk_only"
+      ]
+    },
+    "visibility": {
+      "enum": [
+        "public",
+        "selective",
+        "private"
+      ]
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "valid_after": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "revocation_pointer": {
+      "type": "string"
+    },
+    "appeal_uri": {
+      "type": "string"
+    },
+    "appeal_status": {
+      "enum": [
+        "none",
+        "submitted",
+        "under_review",
+        "upheld",
+        "reversed",
+        "expired",
+        "escalated"
+      ]
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    }
+  }
+}

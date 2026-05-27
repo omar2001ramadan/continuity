@@ -1,0 +1,90 @@
+{
+  "$id": "https://spec.tsl.network/schemas/delegation_policy.v2.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "policy_id",
+    "principal",
+    "delegate",
+    "effect",
+    "actions",
+    "resources",
+    "constraints",
+    "valid_from",
+    "valid_until",
+    "revocation_pointer",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "tsl.delegation_policy.v2"
+    },
+    "policy_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "principal": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "delegate": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "effect": {
+      "enum": [
+        "allow",
+        "deny"
+      ]
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "constraints": {
+      "type": "object"
+    },
+    "subdelegation": {
+      "type": "object"
+    },
+    "valid_from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "valid_until": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "revocation_pointer": {
+      "type": "string"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    },
+    "parent_policy_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "inclusion_proof.v1/single-leaf",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.inclusion_proof.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0x11d3735561e4f4f43ae81d007c8c028a974bc98c0010ece8d374761707bc0653",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

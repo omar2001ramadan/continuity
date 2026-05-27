@@ -1,0 +1,13 @@
+{
+  "type": "tsl.inclusion_proof.v1",
+  "tree_kind": "event",
+  "commitment": "not-valid",
+  "leaf_index": 0,
+  "leaf_hash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "root": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "epoch_start_ms": 1779667200000,
+  "epoch_duration_ms": 300000,
+  "shard": "00af",
+  "path": [],
+  "checkpoint_hash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+}

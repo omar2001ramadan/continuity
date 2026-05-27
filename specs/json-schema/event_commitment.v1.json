@@ -1,0 +1,30 @@
+{
+  "$id": "https://spec.tsl.network/schemas/event_commitment.v1.json",
+  "type": "object",
+  "required": [
+    "type",
+    "event_class",
+    "sender",
+    "signing_key_id",
+    "content_commitment",
+    "timestamp",
+    "nonce",
+    "disclosure_policy",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.event_commitment.v1" },
+    "event_class": { "enum": ["message", "transaction", "attestation", "agent_call", "code_release"] },
+    "sender": { "type": "string", "pattern": "^did:tsl:" },
+    "signing_key_id": { "type": "string" },
+    "receiver_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "content_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "metadata_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "previous_event_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "nonce": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "disclosure_policy": { "enum": ["local_only", "commitment_only", "selective", "public"] },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

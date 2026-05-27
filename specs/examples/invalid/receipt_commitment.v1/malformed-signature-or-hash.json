@@ -1,0 +1,9 @@
+{
+  "type": "tsl.receipt_commitment.v1",
+  "event_commitment": "not-valid",
+  "receiver": "did:tsl:test:bob",
+  "signing_key_id": "#test-key-1",
+  "receipt_class": "replied",
+  "timestamp": "2026-05-25T00:02:00Z",
+  "signature": "0x11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+}

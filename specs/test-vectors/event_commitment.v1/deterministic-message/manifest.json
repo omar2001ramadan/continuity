@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "event_commitment.v1/deterministic-message",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.event_commitment.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0xe344fe34d5ec823c242331e90a67d0b78a7ba14383c42aebd8a90aa318255bdd",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

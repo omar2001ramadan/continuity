@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "delegation_policy.v2/invoice-agent",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.delegation_policy.v2",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0xc9fb471895cb474ea4bd5316970b58c3f47e1eeaa3b9560ab81e106d19273b56",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

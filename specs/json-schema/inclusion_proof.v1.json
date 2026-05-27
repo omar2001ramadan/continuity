@@ -1,0 +1,42 @@
+{
+  "$id": "https://spec.tsl.network/schemas/inclusion_proof.v1.json",
+  "type": "object",
+  "required": [
+    "type",
+    "tree_kind",
+    "commitment",
+    "leaf_index",
+    "leaf_hash",
+    "root",
+    "epoch_start_ms",
+    "epoch_duration_ms",
+    "shard",
+    "path",
+    "checkpoint_hash"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.inclusion_proof.v1" },
+    "tree_kind": { "enum": ["event", "receipt", "attestation", "revocation"] },
+    "commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "leaf_index": { "type": "integer", "minimum": 0 },
+    "leaf_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "root": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "epoch_start_ms": { "type": "integer", "minimum": 0 },
+    "epoch_duration_ms": { "type": "integer", "minimum": 1 },
+    "shard": { "type": "string", "pattern": "^[0-9a-f]{4,16}$" },
+    "path": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["side", "hash"],
+        "additionalProperties": false,
+        "properties": {
+          "side": { "enum": ["left", "right"] },
+          "hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "checkpoint_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" }
+  }
+}
