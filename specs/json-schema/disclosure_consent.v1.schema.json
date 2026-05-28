@@ -1,0 +1,60 @@
+{
+  "$id": "https://spec.tsl.network/schemas/disclosure_consent.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "subject",
+    "verifier_or_provider",
+    "allowed_field_classes",
+    "forbidden_field_classes",
+    "purpose",
+    "issued_at",
+    "expires_at",
+    "revocation_pointer",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.disclosure_consent.v1" },
+    "subject": { "type": "string", "pattern": "^did:tsl:" },
+    "verifier_or_provider": { "type": "string", "pattern": "^did:tsl:" },
+    "allowed_field_classes": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "raw_content",
+          "content_salt",
+          "exact_counterparties",
+          "private_metadata",
+          "local_context",
+          "aggregate_counts",
+          "receipt_thresholds",
+          "attestation_status"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "forbidden_field_classes": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "raw_content",
+          "content_salt",
+          "exact_counterparties",
+          "private_metadata",
+          "local_context",
+          "protected_attributes",
+          "ip_address",
+          "user_agent",
+          "precise_location"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "purpose": { "type": "string", "minLength": 1 },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "revocation_pointer": { "type": "string", "minLength": 1 },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "type": "tsl.key_ceremony_record.v1",
+  "ceremony_id": "auditor-key-registration-2026-05-28",
+  "ceremony_class": "auditor",
+  "participants": ["did:tsl:auditor:lead", "did:tsl:security:key-custodian"],
+  "performed_at": "2026-05-28T12:10:00Z",
+  "key_identifier": "did:tsl:auditor:reference#audit-key-1",
+  "action": "create",
+  "artifacts": ["auditor-public-key.txt", "audit-policy-commitment.txt", "registration-record.txt"],
+  "verification_checks": ["auditor-signature-verified", "checkpoint-policy-linked", "registry-update-prepared"],
+  "signatures": ["0x00"]
+}

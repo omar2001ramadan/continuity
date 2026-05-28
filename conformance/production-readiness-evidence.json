@@ -1,0 +1,147 @@
+{
+  "type": "tsl.production_readiness_evidence.v1",
+  "status": "draft",
+  "owner": "release-governance",
+  "review_date": null,
+  "approver": null,
+  "release_decision": "blocked",
+  "items": [
+    {
+      "id": "security_audit",
+      "status": "draft",
+      "owner": "security",
+      "review_date": null,
+      "approver": null,
+      "evidence_links": [
+        "security/production-security-audit-evidence.md",
+        "security/cryptography-review.md",
+        "security/dependency-policy.md",
+        "security/production-finding-tracker.json",
+        "security/vulnerability-disclosure-policy.md",
+        "security/audit-plan.md"
+      ],
+      "blocking_findings": [],
+      "release_decision": "blocked"
+    },
+    {
+      "id": "legal_review",
+      "status": "draft",
+      "owner": "legal",
+      "review_date": null,
+      "approver": null,
+      "evidence_links": [
+        "legal-compliance/production-legal-review-evidence.md",
+        "legal-compliance/privacy-policy-draft.md",
+        "legal-compliance/terms-of-service-draft.md",
+        "legal-compliance/data-processing-addendum-draft.md",
+        "legal-compliance/gdpr-ccpa-mapping.md",
+        "legal-compliance/law-enforcement-request-policy.md",
+        "legal-compliance/automated-decisioning-review.md",
+        "legal-compliance/appeal-and-takedown-policy.md"
+      ],
+      "blocking_findings": [],
+      "release_decision": "blocked"
+    },
+    {
+      "id": "ops_runbooks",
+      "status": "draft",
+      "owner": "protocol-ops",
+      "review_date": null,
+      "approver": null,
+      "evidence_links": [
+        "runbooks/relay-outage.md",
+        "runbooks/checkpoint-delay.md",
+        "runbooks/checkpoint-conflict.md",
+        "runbooks/log-node-corruption.md",
+        "runbooks/privacy-incident.md",
+        "runbooks/emergency-rollback.md",
+        "runbooks/abuse-campaign.md",
+        "runbooks/data-retention-and-deletion-request.md",
+        "runbooks/auditor-false-positive-finding.md"
+      ],
+      "blocking_findings": [],
+      "release_decision": "blocked"
+    },
+    {
+      "id": "key_management",
+      "status": "draft",
+      "owner": "protocol-security",
+      "review_date": null,
+      "approver": null,
+      "evidence_links": [
+        "security/key-management-policy.md",
+        "key-ceremonies/examples/relay-key-rotation.json",
+        "key-ceremonies/examples/provider-key-creation.json",
+        "key-ceremonies/examples/auditor-key-registration.json",
+        "key-ceremonies/examples/governance-admin-rotation.json",
+        "key-ceremonies/examples/disaster-recovery-restore-test.json",
+        "key-ceremonies/examples/emergency-provider-key-revocation.json"
+      ],
+      "blocking_findings": [],
+      "release_decision": "blocked"
+    },
+    {
+      "id": "provider_governance",
+      "status": "draft",
+      "owner": "protocol-governance",
+      "review_date": null,
+      "approver": null,
+      "evidence_links": [
+        "conformance/tsl-mainnet.md",
+        "security/abuse-response-policy.md",
+        "security/negative-claims-risk-review.md",
+        "evidence/provider-governance/provider-onboarding-criteria.md",
+        "evidence/provider-governance/model-promotion-evidence.md",
+        "evidence/provider-governance/appeals-process-evidence.md",
+        "evidence/provider-governance/scorer-rollback-decision-record.md"
+      ],
+      "blocking_findings": [],
+      "release_decision": "blocked"
+    },
+    {
+      "id": "deployment_evidence",
+      "status": "draft",
+      "owner": "platform-ops",
+      "review_date": null,
+      "approver": null,
+      "evidence_links": [
+        "evidence/deployment/production-environment-proof.md",
+        "evidence/deployment/monitoring-slo-evidence.md",
+        "evidence/deployment/secrets-kms-hsm-evidence.md",
+        "evidence/deployment/production-incident-contacts.md"
+      ],
+      "blocking_findings": [],
+      "release_decision": "blocked"
+    },
+    {
+      "id": "postgres_live_integration",
+      "status": "draft",
+      "owner": "release-engineering",
+      "review_date": null,
+      "approver": null,
+      "evidence_links": ["evidence/integration/postgres-readiness-smoke.json"],
+      "blocking_findings": [],
+      "release_decision": "blocked"
+    },
+    {
+      "id": "cli_sidecar_v2_integration",
+      "status": "draft",
+      "owner": "release-engineering",
+      "review_date": null,
+      "approver": null,
+      "evidence_links": ["evidence/integration/cli-sidecar-v2-smoke.json"],
+      "blocking_findings": [],
+      "release_decision": "blocked"
+    },
+    {
+      "id": "hosted_service_integration",
+      "status": "draft",
+      "owner": "release-engineering",
+      "review_date": null,
+      "approver": null,
+      "evidence_links": ["evidence/integration/hosted-service-smoke.json"],
+      "blocking_findings": [],
+      "release_decision": "blocked"
+    }
+  ]
+}

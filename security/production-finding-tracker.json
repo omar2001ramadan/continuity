@@ -1,0 +1,7 @@
+{
+  "type": "tsl.finding_tracker.v1",
+  "status": "draft",
+  "owner": "security",
+  "updated_at": "2026-05-28T00:00:00Z",
+  "findings": []
+}

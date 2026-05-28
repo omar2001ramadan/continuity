@@ -1,0 +1,28 @@
+{
+  "$id": "https://spec.tsl.network/schemas/provider_governance_status.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "provider",
+    "status",
+    "model_registered",
+    "evaluation_report_commitment",
+    "red_team_result",
+    "privacy_leakage_bps",
+    "promotion_gate_result",
+    "issued_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.provider_governance_status.v1" },
+    "provider": { "type": "string", "pattern": "^did:tsl:" },
+    "status": { "enum": ["sandbox", "active", "probation", "research_only", "revoked"] },
+    "model_registered": { "type": "boolean" },
+    "evaluation_report_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "red_team_result": { "enum": ["pass", "fail", "not_run"] },
+    "privacy_leakage_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "promotion_gate_result": { "enum": ["pass", "fail", "conditional", "research_only"] },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

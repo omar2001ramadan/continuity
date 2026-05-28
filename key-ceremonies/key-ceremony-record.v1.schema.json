@@ -1,0 +1,18 @@
+{
+  "$id": "https://spec.tsl.network/schemas/key_ceremony_record.v1.schema.json",
+  "type": "object",
+  "required": ["type", "ceremony_id", "ceremony_class", "participants", "performed_at", "key_identifier", "action", "artifacts", "verification_checks", "signatures"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.key_ceremony_record.v1" },
+    "ceremony_id": { "type": "string", "minLength": 1 },
+    "ceremony_class": { "enum": ["relay", "provider", "auditor", "governance", "disaster_recovery"] },
+    "participants": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "performed_at": { "type": "string", "format": "date-time" },
+    "key_identifier": { "type": "string", "minLength": 1 },
+    "action": { "enum": ["create", "rotate", "revoke", "restore_test"] },
+    "artifacts": { "type": "array", "items": { "type": "string" } },
+    "verification_checks": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "signatures": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+  }
+}

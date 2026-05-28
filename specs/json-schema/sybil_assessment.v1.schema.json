@@ -4,6 +4,11 @@
   "required": [
     "type",
     "subject",
+    "issuer",
+    "sybil_profile_id",
+    "graph_profile_id",
+    "seed_set_commitment",
+    "evidence_commitment",
     "cluster_id_commitment",
     "computed_at",
     "adversary_tier_assumed",
@@ -11,6 +16,9 @@
     "trusted_escape_bps",
     "internal_receipt_ratio_bps",
     "attack_cost_minor_units",
+    "cost_components",
+    "expected_benefit_minor_units",
+    "attack_scenario",
     "risk_score_bps",
     "risk_label",
     "privacy_level",
@@ -24,6 +32,24 @@
     "subject": {
       "type": "string",
       "pattern": "^did:tsl:"
+    },
+    "issuer": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
+    "sybil_profile_id": {
+      "type": "string"
+    },
+    "graph_profile_id": {
+      "type": "string"
+    },
+    "seed_set_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "evidence_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
     },
     "cluster_id_commitment": {
       "type": "string",
@@ -76,9 +102,46 @@
       "minimum": 0,
       "maximum": 10000
     },
+    "seed_contamination_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "receipt_symmetry_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
     "attack_cost_minor_units": {
       "type": "integer",
       "minimum": 0
+    },
+    "cost_components": {
+      "type": "object",
+      "required": [
+        "identity_cost_minor_units",
+        "time_aging_cost_minor_units",
+        "external_receipt_cost_minor_units",
+        "attestation_cost_minor_units",
+        "compromise_cost_minor_units",
+        "evasion_cost_minor_units"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "identity_cost_minor_units": { "type": "integer", "minimum": 0 },
+        "time_aging_cost_minor_units": { "type": "integer", "minimum": 0 },
+        "external_receipt_cost_minor_units": { "type": "integer", "minimum": 0 },
+        "attestation_cost_minor_units": { "type": "integer", "minimum": 0 },
+        "compromise_cost_minor_units": { "type": "integer", "minimum": 0 },
+        "evasion_cost_minor_units": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "expected_benefit_minor_units": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "attack_scenario": {
+      "type": "string"
     },
     "risk_score_bps": {
       "type": "integer",

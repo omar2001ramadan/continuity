@@ -1,0 +1,32 @@
+{
+  "type": "tsl.integration_evidence.hosted_service_smoke.v1",
+  "status": "passed",
+  "run_id": "hosted-smoke-1780003532522",
+  "generated_at": "2026-05-28T21:25:35.684Z",
+  "services": {
+    "relay": "http://127.0.0.1:49903",
+    "verifier": "http://127.0.0.1:49904",
+    "scoring_provider": "http://127.0.0.1:49905"
+  },
+  "trust_id": "did:tsl:hosted-smoke:hosted-smoke-1780003532522",
+  "commitment": "0x0388f498a01e7979cd08076be540e0859399a08cea70c76c848d444afc32b846",
+  "verification": {
+    "verified": true,
+    "checks": {
+      "schema_valid": true,
+      "signature_valid": true,
+      "key_found": true,
+      "key_active": true,
+      "not_revoked": true,
+      "included_in_log": true,
+      "checkpoint_valid": true,
+      "checkpoint_matches_proof": true,
+      "checkpoint_settled": false,
+      "checkpoint_signature_valid": true
+    }
+  },
+  "assessment": {
+    "status": "accepted",
+    "assessment_id": "0x5a39c4aaf8297d168bf1d840cded44ff56c4ab08a2fb63b9bc9fec3c96e46b89"
+  }
+}

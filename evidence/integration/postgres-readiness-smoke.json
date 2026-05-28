@@ -1,0 +1,31 @@
+{
+  "type": "tsl.integration_evidence.postgres_readiness_smoke.v1",
+  "status": "passed",
+  "run_id": "mainnet-smoke-1780003528981",
+  "generated_at": "2026-05-28T21:25:31.813Z",
+  "database": "TSL_TEST_DATABASE_URL",
+  "trust_id": "did:tsl:mainnet-smoke:mainnet-smoke-1780003528981",
+  "commitment": "0x428f2fe2f9ff384f14dd14cc0d14e48b92e735d2e1335f840c922429dde57284",
+  "checkpoint_hash": "0xa4f404137330d81d3329f2a54a48392968b2c22bf2e23fe78a0edc2f9aca2f6b",
+  "bundle_id": "0x428f2fe2f9ff384f14dd14cc0d14e48b92e735d2e1335f840c922429dde57284",
+  "verification": {
+    "verified": true,
+    "checks": {
+      "schema_valid": true,
+      "signature_valid": true,
+      "key_found": true,
+      "key_active": true,
+      "not_revoked": true,
+      "included_in_log": true,
+      "checkpoint_valid": true,
+      "checkpoint_matches_proof": true,
+      "checkpoint_settled": false,
+      "checkpoint_signature_valid": true
+    }
+  },
+  "persisted": {
+    "scoring_profile_id": "did:tsl:provider:mainnet-smoke/profile/mainnet-smoke-1780003528981",
+    "coverage_bps": 0,
+    "assessment_id": "0xf8c4a23024202b0a78f02346772538c0f82195bd835315cdf79f7aa9419844d9"
+  }
+}

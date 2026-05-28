@@ -1,0 +1,12 @@
+{
+  "type": "tsl.key_ceremony_record.v1",
+  "ceremony_id": "governance-admin-rotation-2026-05-28",
+  "ceremony_class": "governance",
+  "participants": ["did:tsl:governance:release-manager", "did:tsl:security:key-custodian"],
+  "performed_at": "2026-05-28T12:20:00Z",
+  "key_identifier": "did:tsl:governance:admin#key-2",
+  "action": "rotate",
+  "artifacts": ["old-admin-revocation.json", "new-admin-public-key.txt", "governance-update.txt"],
+  "verification_checks": ["new-admin-signature-verified", "old-admin-revoked", "emergency-policy-reviewed"],
+  "signatures": ["0x00"]
+}

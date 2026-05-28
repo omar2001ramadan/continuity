@@ -36,9 +36,12 @@
       "properties": {
         "algorithm": {
           "enum": [
-            "leiden",
-            "louvain",
             "connected_components",
+            "leiden_refinement_v0",
+            "louvain_modularity_v0",
+            "leiden_refinement_v1",
+            "louvain_modularity_v1",
+            "connected_components_v0",
             "none"
           ]
         },
@@ -54,6 +57,30 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 10000
+        },
+        "deterministic_ordering": {
+          "enum": ["node_id_lexicographic"]
+        },
+        "max_passes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "approximation_tolerance_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "refinement_threshold_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "projection": {
+          "enum": ["undirected_sum", "directed_outbound"]
+        },
+        "negative_edge_treatment": {
+          "enum": ["ignore", "cap", "signed"]
         }
       }
     },
@@ -124,6 +151,31 @@
         "type": "integer",
         "minimum": 0,
         "maximum": 10000
+      }
+    },
+    "half_life_days": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "issuer_quality_bps": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10000
+      }
+    },
+    "pagerank": {
+      "type": "object",
+      "required": ["iterations", "damping_bps"],
+      "additionalProperties": false,
+      "properties": {
+        "iterations": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "damping_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "personalization": { "enum": ["trusted_seeds", "subject", "uniform"] }
       }
     }
   }

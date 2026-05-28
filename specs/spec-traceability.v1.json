@@ -1,0 +1,375 @@
+{
+  "type": "tsl.spec_traceability.v1",
+  "source": "Core_architecture.md",
+  "source_mutability": "read_only",
+  "objects": [
+    {
+      "object_type": "identity.v1",
+      "schema_name": "identity",
+      "schema_path": "specs/json-schema/identity.v1.schema.json",
+      "ts_type": "IdentityDocumentV1",
+      "validator": "identity",
+      "valid_example": "specs/examples/valid/identity.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/identity.v1/missing-required.json",
+        "specs/examples/invalid/identity.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/identity.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/identity.v1/valid-local",
+      "migration_note": "RC0 identity documents remain v1; future DID-method changes must use a new type discriminator or explicit extension namespace.",
+      "conformance_level": "rc0"
+    },
+    {
+      "object_type": "event_commitment.v1",
+      "schema_name": "event",
+      "schema_path": "specs/json-schema/event_commitment.v1.schema.json",
+      "ts_type": "EventCommitmentV1",
+      "validator": "event",
+      "valid_example": "specs/examples/valid/event_commitment.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/event_commitment.v1/missing-required.json",
+        "specs/examples/invalid/event_commitment.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/event_commitment.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/event_commitment.v1/deterministic-message",
+      "migration_note": "v1 events verify under v1 canonicalization and signature rules; legacy commitment hashing is only accepted through explicit legacy compatibility paths.",
+      "conformance_level": "rc0"
+    },
+    {
+      "object_type": "proof_bundle.v1",
+      "schema_name": "proofBundleV1",
+      "schema_path": "specs/json-schema/proof_bundle.v1.schema.json",
+      "ts_type": "ProofBundleV1",
+      "validator": "proofBundleV1",
+      "valid_example": "specs/examples/valid/proof_bundle.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/proof_bundle.v1/missing-required.json",
+        "specs/examples/invalid/proof_bundle.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/proof_bundle.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/proof_bundle.v1/valid-offline-bundle",
+      "migration_note": "proof_bundle.v1 is the portable wrapper for old and new signed evidence; embedded objects keep their own version semantics.",
+      "conformance_level": "rc0"
+    },
+    {
+      "object_type": "receipt_commitment.v1",
+      "schema_name": "receipt",
+      "schema_path": "specs/json-schema/receipt_commitment.v1.schema.json",
+      "ts_type": "ReceiptCommitmentV1",
+      "validator": "receipt",
+      "valid_example": "specs/examples/valid/receipt_commitment.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/receipt_commitment.v1/missing-required.json",
+        "specs/examples/invalid/receipt_commitment.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/receipt_commitment.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/receipt_commitment.v1/replied",
+      "migration_note": "receipt_commitment.v1 remains the RC1 reciprocal observation primitive; future receipt classes require schema versioning or extension fields.",
+      "conformance_level": "rc1"
+    },
+    {
+      "object_type": "revocation.v1",
+      "schema_name": "revocation",
+      "schema_path": "specs/json-schema/revocation.v1.schema.json",
+      "ts_type": "RevocationV1",
+      "validator": "revocation",
+      "valid_example": "specs/examples/valid/revocation.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/revocation.v1/missing-required.json",
+        "specs/examples/invalid/revocation.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/revocation.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/revocation.v1/compromise",
+      "migration_note": "v1 revocations are state transitions and are never decayed; newer recovery policy versions must keep historical verification intact.",
+      "conformance_level": "rc1"
+    },
+    {
+      "object_type": "batch_checkpoint.v1",
+      "schema_name": "checkpoint",
+      "schema_path": "specs/json-schema/batch_checkpoint.v1.schema.json",
+      "ts_type": "BatchCheckpointV1",
+      "validator": "checkpoint",
+      "valid_example": "specs/examples/valid/batch_checkpoint.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/batch_checkpoint.v1/missing-required.json",
+        "specs/examples/invalid/batch_checkpoint.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/batch_checkpoint.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/batch_checkpoint.v1/single-leaf",
+      "migration_note": "batch_checkpoint.v1 uses the portable canonical checkpoint identity; chain-specific storage hashes are adapters, not protocol identity.",
+      "conformance_level": "rc1"
+    },
+    {
+      "object_type": "inclusion_proof.v1",
+      "schema_name": "inclusionProof",
+      "schema_path": "specs/json-schema/inclusion_proof.v1.schema.json",
+      "ts_type": "InclusionProofV1",
+      "validator": "inclusionProof",
+      "valid_example": "specs/examples/valid/inclusion_proof.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/inclusion_proof.v1/missing-required.json",
+        "specs/examples/invalid/inclusion_proof.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/inclusion_proof.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/inclusion_proof.v1/single-leaf",
+      "migration_note": "v1 inclusion proofs are tied to immutable closed log segments; future trees must keep leaf/root semantics explicit.",
+      "conformance_level": "rc1"
+    },
+    {
+      "object_type": "scoring_profile.v2",
+      "schema_name": "scoringProfileV2",
+      "schema_path": "specs/json-schema/scoring_profile.v2.schema.json",
+      "ts_type": "ScoringProfileV2",
+      "validator": "scoringProfileV2",
+      "valid_example": "specs/examples/valid/scoring_profile.v2.json",
+      "invalid_examples": [
+        "specs/examples/invalid/scoring_profile.v2/missing-required.json",
+        "specs/examples/invalid/scoring_profile.v2/malformed-signature-or-hash.json",
+        "specs/examples/invalid/scoring_profile.v2/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/scoring_profile.v2/valid-transparent",
+      "migration_note": "scoring_profile.v2 replaces ad hoc model configuration with signed provider profiles and fixed-point commitments.",
+      "conformance_level": "rc2"
+    },
+    {
+      "object_type": "feature_definition.v2",
+      "schema_name": "featureDefinitionV2",
+      "schema_path": "specs/json-schema/feature_definition.v2.schema.json",
+      "ts_type": "FeatureDefinitionV2",
+      "validator": "featureDefinitionV2",
+      "valid_example": "specs/examples/valid/feature_definition.v2.json",
+      "invalid_examples": [
+        "specs/examples/invalid/feature_definition.v2/missing-required.json",
+        "specs/examples/invalid/feature_definition.v2/malformed-signature-or-hash.json",
+        "specs/examples/invalid/feature_definition.v2/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/feature_definition.v2/identity-age",
+      "migration_note": "feature_definition.v2 requires explicit units, privacy class, and attack notes before a feature can enter signed scoring.",
+      "conformance_level": "rc2"
+    },
+    {
+      "object_type": "domain_policy.v1",
+      "schema_name": "domainPolicyV1",
+      "schema_path": "specs/json-schema/domain_policy.v1.schema.json",
+      "ts_type": "DomainPolicyV1",
+      "validator": "domainPolicyV1",
+      "valid_example": "specs/examples/valid/domain_policy.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/domain_policy.v1/missing-required.json",
+        "specs/examples/invalid/domain_policy.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/domain_policy.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/domain_policy.v1/agent-payments",
+      "migration_note": "domain_policy.v1 binds thresholds and gate requirements to a domain; future domains must declare sparse-identity behavior.",
+      "conformance_level": "rc2"
+    },
+    {
+      "object_type": "evidence_coverage.v1",
+      "schema_name": "evidenceCoverageV1",
+      "schema_path": "specs/json-schema/evidence_coverage.v1.schema.json",
+      "ts_type": "EvidenceCoverageV1",
+      "validator": "evidenceCoverageV1",
+      "valid_example": "specs/examples/valid/evidence_coverage.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/evidence_coverage.v1/missing-required.json",
+        "specs/examples/invalid/evidence_coverage.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/evidence_coverage.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/evidence_coverage.v1/high-coverage",
+      "migration_note": "evidence_coverage.v1 separates abstention from suspicion and must be recomputable from declared evidence profiles.",
+      "conformance_level": "rc2"
+    },
+    {
+      "object_type": "trust_assessment.v2",
+      "schema_name": "trustAssessmentV2",
+      "schema_path": "specs/json-schema/trust_assessment.v2.schema.json",
+      "ts_type": "TrustAssessmentV2",
+      "validator": "trustAssessmentV2",
+      "valid_example": "specs/examples/valid/trust_assessment.v2.json",
+      "invalid_examples": [
+        "specs/examples/invalid/trust_assessment.v2/missing-required.json",
+        "specs/examples/invalid/trust_assessment.v2/malformed-signature-or-hash.json",
+        "specs/examples/invalid/trust_assessment.v2/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/trust_assessment.v2/likely-trusted",
+      "migration_note": "trust_assessment.v2 preserves legacy v1 scores only through explicit legacy hashes and adds gates, coverage, expiration, and profile binding.",
+      "conformance_level": "rc2"
+    },
+    {
+      "object_type": "model_card.v2",
+      "schema_name": "modelCardV2",
+      "schema_path": "specs/json-schema/model_card.v2.schema.json",
+      "ts_type": "ModelCardV2",
+      "validator": "modelCardV2",
+      "valid_example": "specs/examples/valid/model_card.v2.json",
+      "invalid_examples": [
+        "specs/examples/invalid/model_card.v2/missing-required.json",
+        "specs/examples/invalid/model_card.v2/malformed-signature-or-hash.json",
+        "specs/examples/invalid/model_card.v2/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/model_card.v2/reference-scorer",
+      "migration_note": "model_card.v2 publishes model limitations, metrics, and linked evaluation/privacy commitments for provider accountability.",
+      "conformance_level": "rc2"
+    },
+    {
+      "object_type": "evaluation_report.v1",
+      "schema_name": "evaluationReportV1",
+      "schema_path": "specs/json-schema/evaluation_report.v1.schema.json",
+      "ts_type": "EvaluationReportV1",
+      "validator": "evaluationReportV1",
+      "valid_example": "specs/examples/valid/evaluation_report.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/evaluation_report.v1/missing-required.json",
+        "specs/examples/invalid/evaluation_report.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/evaluation_report.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/evaluation_report.v1/promotion-pass",
+      "migration_note": "evaluation_report.v1 records deterministic promotion gates and must remain linked from model cards and scoring profiles.",
+      "conformance_level": "rc2"
+    },
+    {
+      "object_type": "disclosure_consent.v1",
+      "schema_name": "disclosureConsentV1",
+      "schema_path": "specs/json-schema/disclosure_consent.v1.schema.json",
+      "ts_type": "DisclosureConsentV1",
+      "validator": "disclosureConsentV1",
+      "valid_example": "specs/examples/valid/disclosure_consent.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/disclosure_consent.v1/missing-required.json",
+        "specs/examples/invalid/disclosure_consent.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/disclosure_consent.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/disclosure_consent.v1/content-opening",
+      "migration_note": "disclosure_consent.v1 gates future export of raw content, salts, exact counterparties, private metadata, and local context; absence means redact.",
+      "conformance_level": "rc3"
+    },
+    {
+      "object_type": "metadata_fingerprint_commitment.v1",
+      "schema_name": "metadataFingerprintCommitmentV1",
+      "schema_path": "specs/json-schema/metadata_fingerprint_commitment.v1.schema.json",
+      "ts_type": "MetadataFingerprintCommitmentV1",
+      "validator": "metadataFingerprintCommitmentV1",
+      "valid_example": "specs/examples/valid/metadata_fingerprint_commitment.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/metadata_fingerprint_commitment.v1/missing-required.json",
+        "specs/examples/invalid/metadata_fingerprint_commitment.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/metadata_fingerprint_commitment.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/metadata_fingerprint_commitment.v1/pairwise",
+      "migration_note": "metadata_fingerprint_commitment.v1 is scoped and rotated; raw fingerprints and salts remain private unless explicitly authorized.",
+      "conformance_level": "rc3"
+    },
+    {
+      "object_type": "graph_profile.v2",
+      "schema_name": "graphProfileV2",
+      "schema_path": "specs/json-schema/graph_profile.v2.schema.json",
+      "ts_type": "GraphProfileV2",
+      "validator": "graphProfileV2",
+      "valid_example": "specs/examples/valid/graph_profile.v2.json",
+      "invalid_examples": [
+        "specs/examples/invalid/graph_profile.v2/missing-required.json",
+        "specs/examples/invalid/graph_profile.v2/malformed-signature-or-hash.json",
+        "specs/examples/invalid/graph_profile.v2/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/graph_profile.v2/default",
+      "migration_note": "graph_profile.v2 declares deterministic graph construction, edge weighting, community, seed, negative-edge, and privacy policies.",
+      "conformance_level": "rc3"
+    },
+    {
+      "object_type": "graph_feature_vector.v1",
+      "schema_name": "graphFeatureVectorV1",
+      "schema_path": "specs/json-schema/graph_feature_vector.v1.schema.json",
+      "ts_type": "GraphFeatureVectorV1",
+      "validator": "graphFeatureVectorV1",
+      "valid_example": "specs/examples/valid/graph_feature_vector.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/graph_feature_vector.v1/missing-required.json",
+        "specs/examples/invalid/graph_feature_vector.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/graph_feature_vector.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/graph_feature_vector.v1/small-graph",
+      "migration_note": "graph_feature_vector.v1 stores fixed-point aggregate graph outputs only; signed floats are not permitted.",
+      "conformance_level": "rc3"
+    },
+    {
+      "object_type": "sybil_assessment.v1",
+      "schema_name": "sybilAssessmentV1",
+      "schema_path": "specs/json-schema/sybil_assessment.v1.schema.json",
+      "ts_type": "SybilAssessmentV1",
+      "validator": "sybilAssessmentV1",
+      "valid_example": "specs/examples/valid/sybil_assessment.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/sybil_assessment.v1/missing-required.json",
+        "specs/examples/invalid/sybil_assessment.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/sybil_assessment.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/sybil_assessment.v1/cluster-b2",
+      "migration_note": "sybil_assessment.v1 reports cost-aware risk labels and cluster commitments, not definitive identity claims.",
+      "conformance_level": "rc3"
+    },
+    {
+      "object_type": "drift_report.v1",
+      "schema_name": "driftReportV1",
+      "schema_path": "specs/json-schema/drift_report.v1.schema.json",
+      "ts_type": "DriftReportV1",
+      "validator": "driftReportV1",
+      "valid_example": "specs/examples/valid/drift_report.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/drift_report.v1/missing-required.json",
+        "specs/examples/invalid/drift_report.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/drift_report.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/drift_report.v1/dormant-reactivation",
+      "migration_note": "drift_report.v1 produces confidence or step-up signals from declared windows and component scores, not permanent accusations.",
+      "conformance_level": "rc3"
+    },
+    {
+      "object_type": "attestation.v2",
+      "schema_name": "attestationV2",
+      "schema_path": "specs/json-schema/attestation.v2.schema.json",
+      "ts_type": "AttestationV2",
+      "validator": "attestationV2",
+      "valid_example": "specs/examples/valid/attestation.v2.json",
+      "invalid_examples": [
+        "specs/examples/invalid/attestation.v2/missing-required.json",
+        "specs/examples/invalid/attestation.v2/malformed-signature-or-hash.json",
+        "specs/examples/invalid/attestation.v2/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/attestation.v2/appealed-negative",
+      "migration_note": "attestation.v2 adds severity, evidence policy, appeal, validity window, and reversal state for negative-claim safety.",
+      "conformance_level": "rc3"
+    },
+    {
+      "object_type": "delegation_policy.v2",
+      "schema_name": "delegationPolicyV2",
+      "schema_path": "specs/json-schema/delegation_policy.v2.schema.json",
+      "ts_type": "DelegationPolicyV2",
+      "validator": "delegationPolicyV2",
+      "valid_example": "specs/examples/valid/delegation_policy.v2.json",
+      "invalid_examples": [
+        "specs/examples/invalid/delegation_policy.v2/missing-required.json",
+        "specs/examples/invalid/delegation_policy.v2/malformed-signature-or-hash.json",
+        "specs/examples/invalid/delegation_policy.v2/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/delegation_policy.v2/invoice-agent",
+      "migration_note": "delegation_policy.v2 replaces monolithic agent_delegation.v1 with scoped policy chains, revocation pointers, and deny-overrides semantics.",
+      "conformance_level": "rc4"
+    },
+    {
+      "object_type": "agent_action.v2",
+      "schema_name": "agentActionV2",
+      "schema_path": "specs/json-schema/agent_action.v2.schema.json",
+      "ts_type": "AgentActionV2",
+      "validator": "agentActionV2",
+      "valid_example": "specs/examples/valid/agent_action.v2.json",
+      "invalid_examples": [
+        "specs/examples/invalid/agent_action.v2/missing-required.json",
+        "specs/examples/invalid/agent_action.v2/malformed-signature-or-hash.json",
+        "specs/examples/invalid/agent_action.v2/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/agent_action.v2/inside-scope",
+      "migration_note": "agent_action.v2 must use issued_at, parameters_commitment, and a delegation-chain root; legacy timestamp/parameter fields are rejected.",
+      "conformance_level": "rc4"
+    }
+  ]
+}

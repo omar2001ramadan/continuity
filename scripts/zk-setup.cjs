@@ -11,7 +11,9 @@ const pot1 = path.join(buildDir, "pot8_0001.ptau");
 const potFinal = path.join(buildDir, "pot8_final.ptau");
 const circuits = [
   "identity_age_threshold",
-  "reciprocal_receipt_count_threshold"
+  "reciprocal_receipt_count_threshold",
+  "revocation_set_non_membership",
+  "agent_scope_compliance"
 ];
 
 function run(command, args) {

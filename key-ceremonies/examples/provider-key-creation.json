@@ -1,0 +1,12 @@
+{
+  "type": "tsl.key_ceremony_record.v1",
+  "ceremony_id": "provider-key-creation-2026-05-28",
+  "ceremony_class": "provider",
+  "participants": ["did:tsl:provider:security-lead", "did:tsl:security:key-custodian"],
+  "performed_at": "2026-05-28T12:00:00Z",
+  "key_identifier": "did:tsl:provider:reference#scoring-key-1",
+  "action": "create",
+  "artifacts": ["provider-public-key.txt", "model-card-commitment.txt", "provider-registration.txt"],
+  "verification_checks": ["key-generated-in-controlled-environment", "provider-signature-verified", "registry-update-prepared"],
+  "signatures": ["0x00"]
+}

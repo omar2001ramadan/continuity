@@ -1,0 +1,12 @@
+{
+  "type": "tsl.key_ceremony_record.v1",
+  "ceremony_id": "emergency-provider-key-revocation-2026-05-28",
+  "ceremony_class": "provider",
+  "participants": ["did:tsl:provider:security-lead", "did:tsl:governance:release-manager"],
+  "performed_at": "2026-05-28T12:40:00Z",
+  "key_identifier": "did:tsl:provider:reference#scoring-key-compromised",
+  "action": "revoke",
+  "artifacts": ["revocation-record.json", "provider-incident-ticket.txt", "verifier-warning-policy.txt"],
+  "verification_checks": ["revocation-signature-verified", "provider-status-paused", "verifier-warning-issued"],
+  "signatures": ["0x00"]
+}

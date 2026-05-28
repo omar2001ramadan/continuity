@@ -1,0 +1,18 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "disclosure_consent.v1/content-opening",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.disclosure_consent.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": [
+    "input.json"
+  ],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0x71337ef7205ed65ee9f884ad08490b002e6f57be52763e226ef5bff90a7dfa2a",
+    "signature_valid": false,
+    "error_code": null
+  }
+}

@@ -60,9 +60,24 @@ export function createVerifierApi() {
         attestations: req.body.attestations,
         revocations: req.body.revocations,
         assessment: req.body.assessment,
+        assessment_v2: req.body.assessment_v2,
+        scoring_profile: req.body.scoring_profile,
+        domain_policy: req.body.domain_policy,
+        evidence_coverage: req.body.evidence_coverage,
+        metadata_fingerprints: req.body.metadata_fingerprints,
+        graph_profile: req.body.graph_profile,
+        graph_feature_vector: req.body.graph_feature_vector,
+        sybil_assessment: req.body.sybil_assessment,
+        drift_report: req.body.drift_report,
         zk_proofs: req.body.zk_proofs,
         delegations: req.body.delegations,
-        audit_findings: req.body.audit_findings
+        delegation_policies: req.body.delegation_policies,
+        agent_actions: req.body.agent_actions,
+        audit_findings: req.body.audit_findings,
+        consistency_proofs: req.body.consistency_proofs,
+        non_membership_proofs: req.body.non_membership_proofs,
+        governance_policy: req.body.governance_policy,
+        disclosure_consents: req.body.disclosure_consents
       };
       const policy: VerifierPolicy = req.body.policy ?? {
         require_inclusion: Boolean(req.body.proof),

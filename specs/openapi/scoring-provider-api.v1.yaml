@@ -2,28 +2,108 @@ openapi: 3.1.0
 info:
   title: TSL Scoring Provider API
   version: 0.1.0
+security:
+  - bearerAuth: []
 paths:
   /v1/assessments:
     post:
-      summary: Request or submit a signed trust assessment.
+      summary: Request or submit a legacy signed trust assessment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
       responses:
         "200": { description: Assessment accepted }
+        "422":
+          description: Assessment rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/assessments/v2:
     post:
-      summary: Request or submit a signed TrustAssessmentV2.
+      summary: Compute and persist a signed TrustAssessmentV2 from verified evidence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrustAssessmentRequestV2'
       responses:
-        "200": { description: V2 assessment accepted }
-        "422": { description: V2 assessment validation failed }
+        "200":
+          description: V2 assessment accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrustAssessmentResponseV2'
+        "422":
+          description: V2 assessment validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/assessments/v2/{assessmentId}:
+    get:
+      summary: Fetch a persisted TrustAssessmentV2.
+      parameters:
+        - name: assessmentId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Trust assessment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrustAssessmentResponseV2'
+        "404":
+          description: Missing assessment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/scoring-profiles/{profileId}:
     get:
       summary: Fetch a signed scoring profile.
+      parameters:
+        - name: profileId
+          in: path
+          required: true
+          schema: { type: string }
       responses:
-        "200": { description: Scoring profile }
+        "200":
+          description: Scoring profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringProfileResponse'
   /v1/model-cards/{modelId}:
     get:
       summary: Fetch a signed model card.
+      parameters:
+        - name: modelId
+          in: path
+          required: true
+          schema: { type: string }
       responses:
-        "200": { description: Model card }
+        "200":
+          description: Model card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelCardResponse'
+  /v1/evaluation-reports/{reportId}:
+    get:
+      summary: Fetch a signed evaluation report.
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Evaluation report }
   /v1/scoring/profiles:
     get:
       summary: List active scoring profiles.
@@ -31,20 +111,138 @@ paths:
         "200": { description: Scoring profiles }
     post:
       summary: Submit a signed scoring_profile.v2 object.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/scoring_profile.v2.schema.json'
       responses:
         "200": { description: Scoring profile accepted }
+        "422":
+          description: Invalid scoring profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/scoring/model-cards:
     post:
       summary: Submit a signed model_card.v2 and linked evaluation report commitment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/model_card.v2.schema.json'
       responses:
         "200": { description: Model card accepted }
+        "422":
+          description: Invalid model card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/scoring/evaluation-reports:
+    post:
+      summary: Submit a signed evaluation_report.v1 object.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/evaluation_report.v1.schema.json'
+      responses:
+        "200": { description: Evaluation report accepted }
+        "422":
+          description: Invalid evaluation report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/graph/features:
     post:
       summary: Compute or submit graph, Sybil, and drift artifacts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GraphArtifactRequest'
       responses:
         "200": { description: Graph artifacts accepted }
   /v1/metadata-fingerprints:
     post:
       summary: Submit a metadata_fingerprint_commitment.v1 without raw metadata.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/metadata_fingerprint_commitment.v1.schema.json'
       responses:
         "200": { description: Metadata fingerprint commitment accepted }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Provider API token.
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code: { type: string }
+            message: { type: string }
+    TrustAssessmentRequestV2:
+      type: object
+      required: [proof_bundle]
+      additionalProperties: true
+      properties:
+        proof_bundle:
+          $ref: '../json-schema/proof_bundle.v1.schema.json'
+        scoring_profile:
+          $ref: '../json-schema/scoring_profile.v2.schema.json'
+        domain_policy:
+          $ref: '../json-schema/domain_policy.v1.schema.json'
+        evidence_coverage:
+          $ref: '../json-schema/evidence_coverage.v1.schema.json'
+    TrustAssessmentResponseV2:
+      type: object
+      required: [assessment]
+      additionalProperties: false
+      properties:
+        status: { type: string }
+        assessment:
+          $ref: '../json-schema/trust_assessment.v2.schema.json'
+    ScoringProfileResponse:
+      type: object
+      required: [profile]
+      properties:
+        profile:
+          $ref: '../json-schema/scoring_profile.v2.schema.json'
+    ModelCardResponse:
+      type: object
+      required: [model_card]
+      properties:
+        model_card:
+          $ref: '../json-schema/model_card.v2.schema.json'
+    GraphArtifactRequest:
+      type: object
+      required: [graph_profile]
+      additionalProperties: true
+      properties:
+        graph_profile:
+          $ref: '../json-schema/graph_profile.v2.schema.json'
+        graph_feature_vector:
+          $ref: '../json-schema/graph_feature_vector.v1.schema.json'
+        sybil_assessment:
+          $ref: '../json-schema/sybil_assessment.v1.schema.json'
+        drift_report:
+          $ref: '../json-schema/drift_report.v1.schema.json'

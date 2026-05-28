@@ -2,55 +2,197 @@ openapi: 3.1.0
 info:
   title: TSL Relay API
   version: 0.1.0
+security:
+  - bearerAuth: []
 paths:
   /v1/identity/create:
     post:
       summary: Register a local TrustID document.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/identity.v1.schema.json'
       responses:
         "200": { description: Identity accepted }
+        "422":
+          description: Invalid identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/commitments:
     post:
       summary: Submit an event commitment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/event_commitment.v1.schema.json'
       responses:
         "200": { description: Event accepted }
+        "422":
+          description: Invalid commitment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/receipts:
     post:
       summary: Submit a receipt commitment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/receipt_commitment.v1.schema.json'
       responses:
         "200": { description: Receipt accepted }
   /v1/attestations:
     post:
       summary: Submit a signed attestation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/attestation.v1.schema.json'
       responses:
         "200": { description: Attestation accepted }
   /v1/keys/revoke:
     post:
       summary: Submit a signed revocation event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/revocation.v1.schema.json'
       responses:
         "200": { description: Revocation accepted }
   /v1/keys/rotate:
     post:
       summary: Submit a signed rotation revocation with replacement key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/revocation.v1.schema.json'
       responses:
         "200": { description: Rotation accepted }
   /v1/proofs/{commitment}:
     get:
       summary: Fetch a portable proof bundle.
+      parameters:
+        - name: commitment
+          in: path
+          required: true
+          schema: { type: string }
       responses:
         "200": { description: Proof bundle }
   /v1/proof-bundles/{bundleId}:
     get:
       summary: Fetch a portable proof bundle by bundle ID or commitment hash.
+      parameters:
+        - name: bundleId
+          in: path
+          required: true
+          schema: { type: string }
       responses:
-        "200": { description: Proof bundle }
+        "200":
+          description: Proof bundle
+          content:
+            application/json:
+              schema:
+                $ref: '../json-schema/proof_bundle.v1.schema.json'
   /v1/proofs/{treeKind}/{commitment}:
     get:
       summary: Fetch an inclusion proof and checkpoint.
+      parameters:
+        - name: treeKind
+          in: path
+          required: true
+          schema: { enum: [event, receipt, attestation, revocation] }
+        - name: commitment
+          in: path
+          required: true
+          schema: { type: string }
       responses:
         "200": { description: Inclusion proof and checkpoint }
   /v1/delegations/verify:
     post:
       summary: Verify delegated agent action under disclosed delegation policies.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DelegationVerificationRequest'
       responses:
-        "200": { description: Delegation is inside scope }
-        "422": { description: Delegation is missing or outside scope }
+        "200":
+          description: Delegation is inside scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DelegationVerificationResponse'
+        "422":
+          description: Delegation is missing or outside scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Relay API token for hosted deployments.
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code: { type: string }
+            message: { type: string }
+    DelegationVerificationRequest:
+      type: object
+      required: [action, delegation_chain, identities]
+      additionalProperties: false
+      properties:
+        action:
+          $ref: '../json-schema/agent_action.v2.schema.json'
+        delegation_chain:
+          type: array
+          items:
+            $ref: '../json-schema/delegation_policy.v2.schema.json'
+        identities:
+          type: array
+          items:
+            $ref: '../json-schema/identity.v1.schema.json'
+        parameters:
+          type: object
+        revoked_policy_ids:
+          type: array
+          items: { type: string }
+        revoked_pointers:
+          type: array
+          items: { type: string }
+    DelegationVerificationResponse:
+      type: object
+      required: [status, result]
+      additionalProperties: false
+      properties:
+        status:
+          enum: [agent_inside_scope, agent_outside_scope]
+        result:
+          type: object
+          additionalProperties: true

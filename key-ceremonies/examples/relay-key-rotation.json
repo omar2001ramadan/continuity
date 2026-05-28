@@ -1,0 +1,12 @@
+{
+  "type": "tsl.key_ceremony_record.v1",
+  "ceremony_id": "relay-rotation-2026-05-27",
+  "ceremony_class": "relay",
+  "participants": ["did:tsl:ops:relay-lead", "did:tsl:security:key-custodian"],
+  "performed_at": "2026-05-27T12:00:00Z",
+  "key_identifier": "did:tsl:relay:local#checkpoint-key-2",
+  "action": "rotate",
+  "artifacts": ["checkpoint-key-public.txt", "revocation-record.json", "registration-tx.txt"],
+  "verification_checks": ["new-key-signature-verified", "old-key-revocation-recorded", "verifier-regression-passed"],
+  "signatures": ["0x00"]
+}

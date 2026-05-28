@@ -22,6 +22,9 @@
       "type": "string",
       "pattern": "^did:tsl:"
     },
+    "drift_profile_id": {
+      "type": "string"
+    },
     "computed_at": {
       "type": "string",
       "format": "date-time"
@@ -33,6 +36,32 @@
     "observation_window_days": {
       "type": "integer",
       "minimum": 1
+    },
+    "feature_history_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "baseline_profile_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "covariance_profile_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "last_verified_event_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "days_since_last_verified_event": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "sparse_mode": {
+      "enum": ["none", "insufficient_baseline", "cohort_baseline"]
+    },
+    "recomputation_status": {
+      "enum": ["not_supplied", "recomputed_match", "recomputed_mismatch", "provider_claim"]
     },
     "drift_score_bps": {
       "type": "integer",
@@ -62,6 +91,19 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "component_scores_bps": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "graph": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "action": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "cadence": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "claim": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "agent": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "local": { "type": "integer", "minimum": 0, "maximum": 10000 }
       }
     },
     "signature": {

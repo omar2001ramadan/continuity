@@ -4,12 +4,15 @@ import {
   contentCommitment,
   eventHash,
   commitmentHashFromParts,
+  legacyCommitmentHashFromParts,
   receiptHash,
   revocationHash,
   auditFindingHash,
   governancePolicyHash,
+  sha256Hex,
   verifyEd25519
 } from "./crypto";
+import { canonicalBytes } from "./canonicalize";
 import { verifyAgentDelegation } from "./agent";
 import { verifyConsistencyProof } from "./consistency";
 import { findVerificationMethod, keyActiveAt, notRevokedAt } from "./identity";
@@ -22,7 +25,12 @@ import { validateSchema } from "./validation";
 import { verifyThresholdProofAsync } from "./zk";
 import {
   agentActionV2Hash,
+  computeDriftReportV0,
+  computeGraphFeatureVectorV0,
+  computeSybilAssessmentV0,
+  constructGraphFromEvidenceV0,
   delegationPolicyV2Hash,
+  disclosureConsentV1Hash,
   driftReportV1Hash,
   graphFeatureVectorV1Hash,
   metadataFingerprintCommitmentV1Hash,
@@ -50,6 +58,28 @@ function checkpointRootForKind(checkpoint: BatchCheckpointV1, kind: string): str
   if (kind === "attestation") return checkpoint.attestation_root;
   if (kind === "revocation") return checkpoint.revocation_root;
   return undefined;
+}
+
+async function disclosureConsentAllows(input: VerifyTSLInput, fieldClasses: string[], resolver: TrustResolver, policy: VerifierPolicy): Promise<boolean> {
+  const consents = input.disclosure_consents ?? [];
+  const at = Date.parse(input.envelope.timestamp);
+  for (const consent of consents) {
+    const validation = validateSchema("disclosureConsentV1", consent);
+    if (!validation.valid || consent.subject !== input.envelope.sender) continue;
+    if (Date.parse(consent.issued_at) > at || Date.parse(consent.expires_at) <= at) continue;
+    if (policy.verifier_or_provider && consent.verifier_or_provider !== policy.verifier_or_provider) continue;
+    if (policy.disclosure_purpose && consent.purpose !== policy.disclosure_purpose) continue;
+    if (policy.revoked_disclosure_pointers?.includes(consent.revocation_pointer)) continue;
+    const allowed = new Set(consent.allowed_field_classes);
+    const forbidden = new Set(consent.forbidden_field_classes);
+    if (!fieldClasses.every((fieldClass) => allowed.has(fieldClass) && !forbidden.has(fieldClass))) continue;
+    const identity = await resolver.resolveTrustID(consent.subject, consent.issued_at);
+    const consentKey = identity?.verification_methods.find((method) => keyActiveAt(method, consent.issued_at) && notRevokedAt(method));
+    if (consentKey?.type === "ed25519" && verifyEd25519(consentKey.public_key, disclosureConsentV1Hash(consent), consent.signature)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function verifyTSL(
@@ -95,6 +125,7 @@ export async function verifyTSL(
   }
 
   const commitmentHash = commitmentHashFromParts(unsignedEventHash, input.envelope.signature);
+  const legacyCommitmentHash = legacyCommitmentHashFromParts(unsignedEventHash, input.envelope.signature);
 
   if (policy.require_chain_revocation) {
     if (settlementBackend?.isKeyRevokedAt) {
@@ -151,9 +182,13 @@ export async function verifyTSL(
   }
 
   if (input.message_disclosure?.raw_message !== undefined && input.message_disclosure.content_salt) {
+    checks.disclosure_consent_valid = await disclosureConsentAllows(input, ["raw_content", "content_salt"], resolver, policy);
+    if (!checks.disclosure_consent_valid) {
+      errors.push("TSL_DISCLOSURE_CONSENT_MISSING");
+    }
     checks.content_commitment_matches =
-      contentCommitment(input.message_disclosure.raw_message, input.message_disclosure.content_salt) ===
-      input.envelope.content_commitment;
+      checks.disclosure_consent_valid &&
+      contentCommitment(input.message_disclosure.raw_message, input.message_disclosure.content_salt) === input.envelope.content_commitment;
     if (checks.content_commitment_matches) {
       explanation.push("Disclosed message matches content commitment");
     }
@@ -164,7 +199,10 @@ export async function verifyTSL(
     if (!proofValidation.valid) {
       errors.push("TSL_INCLUSION_INVALID", ...proofValidation.errors);
     } else {
-      checks.included_in_log = input.proof.tree_kind === "event" && input.proof.commitment === commitmentHash && verifyInclusion(input.proof);
+      checks.included_in_log =
+        input.proof.tree_kind === "event" &&
+        (input.proof.commitment === commitmentHash || input.proof.commitment === legacyCommitmentHash) &&
+        verifyInclusion(input.proof);
       if (checks.included_in_log) explanation.push("Event included in Merkle log proof");
       if (input.proof.tree_kind === "receipt") checks.receipt_included = verifyInclusion(input.proof);
       if (input.proof.tree_kind === "attestation") checks.attestation_included = verifyInclusion(input.proof);
@@ -184,7 +222,7 @@ export async function verifyTSL(
       const receiptIdentity = await resolver.resolveTrustID(receipt.receiver, receipt.timestamp);
       const receiptKey = receiptIdentity ? findVerificationMethod(receiptIdentity, receipt.signing_key_id) : null;
       const valid =
-        receipt.event_commitment === commitmentHash &&
+        (receipt.event_commitment === commitmentHash || receipt.event_commitment === legacyCommitmentHash) &&
         receiptKey?.type === "ed25519" &&
         keyActiveAt(receiptKey, receipt.timestamp) &&
         verifyEd25519(receiptKey.public_key, receiptHash(receipt), receipt.signature);
@@ -307,6 +345,27 @@ export async function verifyTSL(
       if (!checks.evidence_coverage_valid) errors.push("TSL_EVIDENCE_COVERAGE_INVALID", ...validation.errors);
     }
 
+    if (policy.require_provider_governance_active) {
+      const governance = input.provider_governance_status;
+      const governanceValidation = governance ? validateSchema("providerGovernanceStatusV1", governance) : { valid: false, errors: [] };
+      const expectedProvider = input.scoring_profile?.provider ?? input.assessment_v2?.issuer;
+      checks.provider_governance_valid = Boolean(
+        governance &&
+          governanceValidation.valid &&
+          governance.provider === expectedProvider &&
+          governance.status === "active" &&
+          governance.model_registered === true &&
+          governance.promotion_gate_result === "pass" &&
+          governance.red_team_result === "pass" &&
+          governance.privacy_leakage_bps <= 1000
+      );
+      if (!checks.provider_governance_valid) {
+        errors.push(...governanceValidation.errors);
+        errors.push("TSL_PROVIDER_INACTIVE");
+        if (governance?.model_registered === false) errors.push("TSL_MODEL_NOT_REGISTERED");
+      }
+    }
+
     if (input.assessment_v2) {
       const validation = validateSchema("trustAssessmentV2", input.assessment_v2);
       const issuerIdentity = validation.valid ? await resolver.resolveTrustID(input.assessment_v2.issuer, input.assessment_v2.issued_at) : null;
@@ -314,12 +373,20 @@ export async function verifyTSL(
       const profileMatches =
         !input.scoring_profile || input.assessment_v2.scoring_profile_id === input.scoring_profile.profile_id;
       const domainMatches = !input.domain_policy || input.assessment_v2.domain === input.domain_policy.domain;
+      const gateMatches =
+        input.assessment_v2.gate_result.schema_valid === checks.schema_valid &&
+        input.assessment_v2.gate_result.signature_valid === checks.signature_valid &&
+        input.assessment_v2.gate_result.key_active === checks.key_active &&
+        input.assessment_v2.gate_result.not_revoked === checks.not_revoked &&
+        (input.assessment_v2.gate_result.included_in_log === undefined || input.assessment_v2.gate_result.included_in_log === checks.included_in_log);
       checks.trust_assessment_v2_valid = Boolean(
         validation.valid &&
           input.assessment_v2.subject === input.envelope.sender &&
           Date.parse(input.assessment_v2.expires_at) > Date.now() &&
           profileMatches &&
           domainMatches &&
+          gateMatches &&
+          (!input.scoring_profile || input.assessment_v2.issuer === input.scoring_profile.provider) &&
           issuerKey?.type === "ed25519" &&
           verifyEd25519(issuerKey.public_key, trustAssessmentV2Hash(input.assessment_v2), input.assessment_v2.signature)
       );
@@ -328,11 +395,14 @@ export async function verifyTSL(
         riskLabel =
           input.assessment_v2.label === "cryptographic_failure" ||
           input.assessment_v2.label === "settlement_missing" ||
+          input.assessment_v2.label === "unsettled_or_unproven" ||
+          input.assessment_v2.label === "delegation_missing" ||
           input.assessment_v2.label === "revoked_or_compromised"
             ? "high_risk"
             : input.assessment_v2.label;
       } else {
         errors.push("TSL_TRUST_ASSESSMENT_V2_INVALID", ...validation.errors);
+        if (!gateMatches) errors.push("TSL_ASSESSMENT_GATE_MISMATCH");
       }
     } else if (policy.require_v2_assessment) {
       checks.trust_assessment_v2_valid = false;
@@ -379,16 +449,44 @@ export async function verifyTSL(
       checks.graph_artifacts_valid =
         checks.graph_artifacts_valid &&
         input.graph_feature_vector.subject === input.envelope.sender &&
+        (!policy.require_research_graph_algorithm ||
+          input.graph_feature_vector.community_algorithm_id === input.graph_profile?.community_detection.algorithm) &&
         subjectKey?.type === "ed25519" &&
         verifyEd25519(subjectKey.public_key, graphFeatureVectorV1Hash(input.graph_feature_vector), input.graph_feature_vector.signature);
     }
+    if (policy.require_research_graph_algorithm) {
+      const algorithm = input.graph_profile?.community_detection.algorithm;
+      checks.research_graph_algorithm_valid = algorithm === "louvain_modularity_v1" || algorithm === "leiden_refinement_v1";
+      if (!checks.research_graph_algorithm_valid) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.research_graph_algorithm_valid;
+    }
+    if (policy.require_seed_governance_opening) {
+      const trustedSeeds = [...((input as unknown as { trusted_seeds?: string[] }).trusted_seeds ?? [])].sort();
+      const adversarialSeeds = [...((input as unknown as { adversarial_seeds?: string[] }).adversarial_seeds ?? [])].sort();
+      const trustedCommitment = sha256Hex(canonicalBytes(trustedSeeds));
+      const adversarialCommitment = sha256Hex(canonicalBytes(adversarialSeeds));
+      checks.seed_governance_valid = Boolean(
+        input.graph_profile &&
+          trustedCommitment === input.graph_profile.seed_sets.trusted_seed_commitment &&
+          adversarialCommitment === input.graph_profile.seed_sets.adversarial_seed_commitment
+      );
+      if (!checks.seed_governance_valid) errors.push("TSL_SEED_GOVERNANCE_OPENING_INVALID");
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.seed_governance_valid;
+    }
     if (input.sybil_assessment) {
-      const subjectIdentity = await resolver.resolveTrustID(input.sybil_assessment.subject, input.sybil_assessment.computed_at);
-      const subjectKey = subjectIdentity?.verification_methods.find((method) => keyActiveAt(method, input.sybil_assessment!.computed_at));
+      if (policy.require_sybil_provider_issuer && !input.sybil_assessment.issuer) {
+        checks.sybil_assessment_valid = false;
+        checks.graph_artifacts_valid = false;
+        errors.push("TSL_SYBIL_PROVIDER_ISSUER_REQUIRED");
+      }
+      const issuerOrSubject = input.sybil_assessment.issuer ?? input.sybil_assessment.subject;
+      const issuerIdentity = await resolver.resolveTrustID(issuerOrSubject, input.sybil_assessment.computed_at);
+      const issuerKey = issuerIdentity?.verification_methods.find((method) => keyActiveAt(method, input.sybil_assessment!.computed_at));
       checks.sybil_assessment_valid = Boolean(
-        input.sybil_assessment.subject === input.envelope.sender &&
-          subjectKey?.type === "ed25519" &&
-          verifyEd25519(subjectKey.public_key, sybilAssessmentV1Hash(input.sybil_assessment), input.sybil_assessment.signature)
+        checks.sybil_assessment_valid !== false &&
+          input.sybil_assessment.subject === input.envelope.sender &&
+          issuerKey?.type === "ed25519" &&
+          verifyEd25519(issuerKey.public_key, sybilAssessmentV1Hash(input.sybil_assessment), input.sybil_assessment.signature)
       );
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.sybil_assessment_valid;
     }
@@ -401,6 +499,97 @@ export async function verifyTSL(
           verifyEd25519(subjectKey.public_key, driftReportV1Hash(input.drift_report), input.drift_report.signature)
       );
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.drift_report_valid;
+    }
+    if (
+      input.graph_profile &&
+      input.graph_feature_vector &&
+      (input.receipts?.length || input.attestations?.length || input.delegation_policies?.length)
+    ) {
+      const evidenceGraph = await constructGraphFromEvidenceV0({
+        events: [input.envelope],
+        receipts: input.receipts,
+        attestations: input.attestations,
+        delegation_policies: input.delegation_policies,
+        resolver,
+        graph_profile: input.graph_profile,
+        at_time: input.graph_feature_vector.computed_at,
+        event_senders: {
+          [commitmentHash]: input.envelope.sender,
+          [legacyCommitmentHash]: input.envelope.sender
+        }
+      });
+      const recomputed = computeGraphFeatureVectorV0({
+        subject: input.graph_feature_vector.subject,
+        graph: evidenceGraph,
+        graph_profile_id: input.graph_profile.profile_id,
+        graph_profile: input.graph_profile,
+        trusted_seeds: (input as unknown as { trusted_seeds?: string[] }).trusted_seeds,
+        adversarial_seeds: (input as unknown as { adversarial_seeds?: string[] }).adversarial_seeds,
+        computed_at: input.graph_feature_vector.computed_at
+      });
+      const graphMatches =
+        recomputed.weighted_degree_bps === input.graph_feature_vector.weighted_degree_bps &&
+        recomputed.reciprocity_bps === input.graph_feature_vector.reciprocity_bps &&
+        recomputed.counterparty_hhi_bps === input.graph_feature_vector.counterparty_hhi_bps &&
+        recomputed.counterparty_entropy_bps === input.graph_feature_vector.counterparty_entropy_bps &&
+        recomputed.effective_counterparty_count_milli === input.graph_feature_vector.effective_counterparty_count_milli &&
+        recomputed.seed_escape_bps === input.graph_feature_vector.seed_escape_bps &&
+        recomputed.adversarial_proximity_bps === input.graph_feature_vector.adversarial_proximity_bps &&
+        recomputed.community_algorithm_id === input.graph_feature_vector.community_algorithm_id &&
+        recomputed.community_escape_bps === input.graph_feature_vector.community_escape_bps &&
+        recomputed.community_diversity_bps === input.graph_feature_vector.community_diversity_bps &&
+        recomputed.conductance_bps === input.graph_feature_vector.conductance_bps &&
+        recomputed.trusted_neighbor_mass_bps === input.graph_feature_vector.trusted_neighbor_mass_bps &&
+        recomputed.trusted_seed_distance_bps === input.graph_feature_vector.trusted_seed_distance_bps &&
+        recomputed.adversarial_seed_distance_bps === input.graph_feature_vector.adversarial_seed_distance_bps &&
+        recomputed.pagerank_bps === input.graph_feature_vector.pagerank_bps &&
+        recomputed.ppr_lite_bps === input.graph_feature_vector.ppr_lite_bps &&
+        recomputed.modularity_bps === input.graph_feature_vector.modularity_bps &&
+        recomputed.community_pass_count === input.graph_feature_vector.community_pass_count;
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && graphMatches;
+      if (!graphMatches) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
+      if (input.sybil_assessment) {
+        const sybilProfile = (input as unknown as { sybil_profile?: Parameters<typeof computeSybilAssessmentV0>[0]["sybil_profile"] }).sybil_profile;
+        const recomputedSybil = computeSybilAssessmentV0({
+          subject: input.sybil_assessment.subject,
+          issuer: input.sybil_assessment.issuer,
+          graph: evidenceGraph,
+          graph_profile: input.graph_profile,
+          trusted_seeds: (input as unknown as { trusted_seeds?: string[] }).trusted_seeds,
+          adversarial_seeds: (input as unknown as { adversarial_seeds?: string[] }).adversarial_seeds,
+          computed_at: input.sybil_assessment.computed_at,
+          sybil_profile: sybilProfile
+        });
+        const sybilMatches =
+          recomputedSybil.cluster_concentration_bps === input.sybil_assessment.cluster_concentration_bps &&
+          recomputedSybil.trusted_escape_bps === input.sybil_assessment.trusted_escape_bps &&
+          recomputedSybil.internal_receipt_ratio_bps === input.sybil_assessment.internal_receipt_ratio_bps &&
+          recomputedSybil.risk_score_bps === input.sybil_assessment.risk_score_bps &&
+          recomputedSybil.risk_label === input.sybil_assessment.risk_label;
+        checks.graph_artifacts_valid = checks.graph_artifacts_valid && sybilMatches;
+        if (!sybilMatches) errors.push("TSL_SYBIL_ARTIFACT_INVALID");
+      }
+      if (input.drift_report && (input as unknown as { drift_feature_history?: unknown[] }).drift_feature_history) {
+        const recomputedDrift = computeDriftReportV0({
+          subject: input.drift_report.subject,
+          feature_history: (input as unknown as { drift_feature_history: Parameters<typeof computeDriftReportV0>[0]["feature_history"] }).drift_feature_history,
+          baseline_window_days: input.drift_report.baseline_window_days,
+          observation_window_days: input.drift_report.observation_window_days,
+          computed_at: input.drift_report.computed_at,
+          component_scores_bps: input.drift_report.component_scores_bps
+        });
+        const driftMatches =
+          recomputedDrift.drift_score_bps === input.drift_report.drift_score_bps &&
+          recomputedDrift.drift_label === input.drift_report.drift_label &&
+          recomputedDrift.action === input.drift_report.action;
+        checks.graph_artifacts_valid = checks.graph_artifacts_valid && driftMatches;
+        if (!driftMatches) errors.push("TSL_DRIFT_ARTIFACT_INVALID");
+      }
+      if (policy.require_full_covariance_drift && input.drift_report) {
+        checks.full_covariance_drift_valid = Boolean(input.drift_report.covariance_profile_commitment && input.drift_report.feature_history_commitment);
+        if (!checks.full_covariance_drift_valid) errors.push("TSL_FULL_COVARIANCE_DRIFT_REQUIRED");
+        checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.full_covariance_drift_valid;
+      }
     }
     if (policy.require_graph_artifacts && !checks.graph_artifacts_valid) {
       errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
@@ -416,8 +605,18 @@ export async function verifyTSL(
     const validClaims = new Set<string>();
     for (const proof of input.zk_proofs ?? []) {
       const validation = validateSchema("zkThresholdProof", proof);
-      const valid = validation.valid && proof.subject === input.envelope.sender && (await verifyThresholdProofAsync(proof));
+      const valid =
+        validation.valid &&
+        proof.subject === input.envelope.sender &&
+        (await verifyThresholdProofAsync(proof, {
+          require_registered_circuit: policy.require_registered_zk_circuit,
+          require_manifest_verification_key_hash: policy.require_manifest_verification_key_hash,
+          reject_dev_circuits: policy.reject_dev_zk_circuits,
+          manifests: input.zk_circuit_manifests,
+          registry: input.zk_verification_key_registry
+        }));
       if (valid) {
+        if (policy.require_registered_zk_circuit) checks.zk_circuit_registered = true;
         validClaims.add(proof.claim);
       } else {
         checks.zk_valid = false;
@@ -480,11 +679,11 @@ export async function verifyTSL(
       const result =
         validation.valid && input.delegation_policies
           ? verifyDelegatedAgentActionV0({
-              action,
-              delegation_chain: input.delegation_policies,
-              public_keys: publicKeys,
-              at_time: input.envelope.timestamp
-            })
+	              action,
+	              delegation_chain: input.delegation_policies,
+	              public_keys: publicKeys,
+	              at_time: action.issued_at
+	            })
           : { ok: false, error_code: "TSL_DELEGATION_POLICY_MISSING" };
       if (!result.ok) {
         checks.delegated_action_valid = false;
@@ -518,7 +717,10 @@ export async function verifyTSL(
     let matchedNonMembership = false;
     for (const proof of input.non_membership_proofs ?? []) {
       const validation = validateSchema("nonMembershipProof", proof);
-      const valid = validation.valid && proof.subject === input.envelope.sender && verifyNonMembershipProof(proof);
+      const sparseRequired = policy.require_sparse_merkle_revocation_root === true;
+      const sparseShape = Boolean(proof.tree_id && proof.root && proof.root_checkpoint && proof.leaf_index_commitment && proof.leaf_value_commitment && proof.sibling_path?.length);
+      const checkpointRootBound = !sparseRequired || !input.checkpoint || proof.root_checkpoint === checkpointHash(input.checkpoint);
+      const valid = validation.valid && proof.subject === input.envelope.sender && (!sparseRequired || sparseShape) && checkpointRootBound && verifyNonMembershipProof(proof);
       if (valid) matchedNonMembership = true;
       if (!valid) {
         checks.non_membership_proof_valid = false;
@@ -602,6 +804,16 @@ export async function verifyTSL(
     checks.checkpoint_valid = checkpointValidation.valid;
     if (!checkpointValidation.valid) {
       errors.push("TSL_CHECKPOINT_INVALID", ...checkpointValidation.errors);
+    } else {
+      const relayIdentity = await resolver.resolveTrustID(input.checkpoint.relay_id, input.envelope.timestamp);
+      const relayKey = relayIdentity?.verification_methods.find((method) => keyActiveAt(method, input.envelope.timestamp));
+      const unsafeFixtureSignatureAllowed = process.env.ALLOW_UNSAFE_CHECKPOINT_SIGNATURE_FIXTURES === "true";
+      checks.checkpoint_signature_valid =
+        (unsafeFixtureSignatureAllowed && input.checkpoint.relay_signature === "0x00") ||
+        (relayKey?.type === "ed25519" && verifyEd25519(relayKey.public_key, checkpointHash(input.checkpoint), input.checkpoint.relay_signature));
+      if (!checks.checkpoint_signature_valid) {
+        errors.push("TSL_CHECKPOINT_SIGNATURE_INVALID");
+      }
     }
   }
 
@@ -610,6 +822,7 @@ export async function verifyTSL(
       input.proof.epoch_start_ms === input.checkpoint.epoch_start_ms &&
       input.proof.epoch_duration_ms === input.checkpoint.epoch_duration_ms &&
       input.proof.shard === input.checkpoint.shard &&
+      input.proof.checkpoint_hash === checkpointHash(input.checkpoint) &&
       checkpointRootForKind(input.checkpoint, input.proof.tree_kind) === input.proof.root;
     if (checks.checkpoint_matches_proof) explanation.push("Checkpoint root matches inclusion proof");
   }
@@ -623,6 +836,26 @@ export async function verifyTSL(
     } else if (settlement.error) {
       errors.push(settlement.error);
       settlementStatus = settlement.error.includes("MISMATCH") ? "mismatch" : settlement.error.includes("UNAVAILABLE") ? "unavailable" : "pending";
+    }
+  }
+
+  if (input.assessment_v2) {
+    const finalGateMatches =
+      (input.assessment_v2.gate_result.checkpoint_valid === undefined ||
+        input.assessment_v2.gate_result.checkpoint_valid === checks.checkpoint_matches_proof) &&
+      (input.assessment_v2.gate_result.settlement_satisfied === undefined ||
+        input.assessment_v2.gate_result.settlement_satisfied === checks.checkpoint_settled) &&
+      (input.assessment_v2.gate_result.delegation_valid === undefined ||
+        input.assessment_v2.gate_result.delegation_valid === checks.delegated_action_valid);
+    const coverageMatches =
+      !input.evidence_coverage ||
+      (input.assessment_v2.coverage_bps === input.evidence_coverage.coverage_bps &&
+        (!input.assessment_v2.evidence_coverage_commitment ||
+          input.assessment_v2.evidence_coverage_commitment === sha256Hex(canonicalBytes(input.evidence_coverage))));
+    if (!finalGateMatches || !coverageMatches) {
+      checks.trust_assessment_v2_valid = false;
+      if (!finalGateMatches) errors.push("TSL_ASSESSMENT_GATE_MISMATCH");
+      if (!coverageMatches) errors.push("TSL_EVIDENCE_COVERAGE_INVALID");
     }
   }
 
@@ -642,6 +875,8 @@ export async function verifyTSL(
     checks.key_active &&
     checks.not_revoked &&
     checks.content_commitment_matches !== false &&
+    checks.disclosure_consent_valid !== false &&
+    checks.checkpoint_signature_valid !== false &&
     checks.receipt_valid !== false &&
     checks.attestation_valid !== false &&
     checks.revocation_state_valid !== false &&
@@ -659,6 +894,11 @@ export async function verifyTSL(
     checks.agent_scope_valid !== false &&
     checks.consistency_proof_valid !== false &&
     checks.non_membership_proof_valid !== false &&
+    checks.zk_circuit_registered !== false &&
+    checks.research_graph_algorithm_valid !== false &&
+    checks.provider_governance_valid !== false &&
+    checks.seed_governance_valid !== false &&
+    checks.full_covariance_drift_valid !== false &&
     checks.governance_policy_valid !== false &&
     checks.audit_consistency_valid !== false &&
     (!policy.require_chain_revocation || checks.chain_revocation_checked === true) &&
@@ -666,6 +906,11 @@ export async function verifyTSL(
     (!policy.require_agent_scope || checks.agent_scope_valid === true) &&
     (!policy.require_consistency_proof || checks.consistency_proof_valid === true) &&
     (!policy.require_non_membership_proof || checks.non_membership_proof_valid === true) &&
+    (!policy.require_registered_zk_circuit || checks.zk_circuit_registered === true) &&
+    (!policy.require_research_graph_algorithm || checks.research_graph_algorithm_valid === true) &&
+    (!policy.require_provider_governance_active || checks.provider_governance_valid === true) &&
+    (!policy.require_seed_governance_opening || checks.seed_governance_valid === true) &&
+    (!policy.require_full_covariance_drift || checks.full_covariance_drift_valid === true) &&
     (!policy.require_governance_policy || checks.governance_policy_valid === true) &&
     (!policy.require_audit_consistency || checks.audit_consistency_valid === true) &&
     (!policy.require_v2_assessment || checks.trust_assessment_v2_valid === true) &&

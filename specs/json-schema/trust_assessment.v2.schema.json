@@ -19,6 +19,28 @@
     "signature"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "label": {
+            "enum": [
+              "cryptographic_failure",
+              "revoked_or_compromised",
+              "settlement_missing",
+              "unsettled_or_unproven",
+              "delegation_missing"
+            ]
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "required": ["score_bps"]
+        }
+      }
+    }
+  ],
   "properties": {
     "type": {
       "const": "tsl.trust_assessment.v2"
@@ -114,7 +136,9 @@
         "high_risk",
         "cryptographic_failure",
         "revoked_or_compromised",
-        "settlement_missing"
+        "settlement_missing",
+        "unsettled_or_unproven",
+        "delegation_missing"
       ]
     },
     "reason_codes": {

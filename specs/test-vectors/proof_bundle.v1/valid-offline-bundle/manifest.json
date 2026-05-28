@@ -11,7 +11,7 @@
   ],
   "expected": {
     "schema_valid": true,
-    "canonical_hash": "0xb1263d48731d0cb75449702bf69e1429d6a7495647126a8c457dabfd5648e8e4",
+    "canonical_hash": "0xe08362c890397f9a3a53270c34a38fbb44180ed997fd5d8260f20a2c7477c307",
     "signature_valid": true,
     "error_code": null
   }

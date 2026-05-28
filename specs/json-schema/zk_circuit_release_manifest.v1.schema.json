@@ -1,0 +1,50 @@
+{
+  "$id": "https://spec.tsl.network/schemas/zk_circuit_release_manifest.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "circuit_id",
+    "claim",
+    "version",
+    "circuit_hash",
+    "r1cs_hash",
+    "wasm_hash",
+    "zkey_hash",
+    "verification_key_id",
+    "verification_key_hash",
+    "ceremony_transcript_hash",
+    "auditor",
+    "reviewer",
+    "status",
+    "issued_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.zk.circuit_release_manifest.v1" },
+    "circuit_id": { "type": "string" },
+    "claim": {
+      "enum": [
+        "identity_age_days",
+        "reciprocal_receipt_count",
+        "organization_membership",
+        "set_membership",
+        "revocation_set_non_membership",
+        "agent_scope_compliance"
+      ]
+    },
+    "version": { "type": "string" },
+    "circuit_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "r1cs_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "wasm_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "zkey_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "verification_key_id": { "type": "string" },
+    "verification_key_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "verification_key": { "type": "object" },
+    "ceremony_transcript_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "auditor": { "type": "string", "pattern": "^did:tsl:" },
+    "reviewer": { "type": "string", "pattern": "^did:tsl:" },
+    "status": { "enum": ["dev", "candidate", "active", "revoked"] },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

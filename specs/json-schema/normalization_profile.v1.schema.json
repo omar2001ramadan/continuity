@@ -1,0 +1,25 @@
+{
+  "$id": "https://spec.tsl.network/schemas/normalization_profile.v1.schema.json",
+  "type": "object",
+  "required": ["type", "profile_id", "feature_ranges_bps", "issued_at"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.normalization_profile.v1" },
+    "profile_id": { "type": "string" },
+    "feature_ranges_bps": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["min_bps", "max_bps", "missing_bps"],
+        "additionalProperties": false,
+        "properties": {
+          "min_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "max_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "missing_bps": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        }
+      }
+    },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

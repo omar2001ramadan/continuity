@@ -1,0 +1,22 @@
+{
+  "type": "tsl.disclosure_consent.v1",
+  "subject": "did:tsl:test:alice",
+  "verifier_or_provider": "did:tsl:provider:continuity-labs",
+  "allowed_field_classes": [
+    "raw_content",
+    "content_salt",
+    "aggregate_counts"
+  ],
+  "forbidden_field_classes": [
+    "exact_counterparties",
+    "protected_attributes",
+    "ip_address",
+    "user_agent",
+    "precise_location"
+  ],
+  "purpose": "proof_link_content_opening",
+  "issued_at": "2026-05-27T12:00:00Z",
+  "expires_at": "2026-06-27T12:00:00Z",
+  "revocation_pointer": "did:tsl:test:alice#disclosure-revocations",
+  "signature": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

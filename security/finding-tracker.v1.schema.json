@@ -1,0 +1,43 @@
+{
+  "$id": "https://spec.tsl.network/schemas/finding_tracker.v1.schema.json",
+  "type": "object",
+  "required": ["type", "status", "owner", "updated_at", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.finding_tracker.v1" },
+    "status": { "enum": ["draft", "active", "approved", "rejected"] },
+    "owner": { "type": "string", "minLength": 1 },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "severity",
+          "status",
+          "owner",
+          "description",
+          "fix_commit",
+          "retest_evidence",
+          "closure_approver",
+          "closed_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["low", "medium", "high", "critical"] },
+          "status": { "enum": ["open", "mitigated", "accepted", "closed"] },
+          "owner": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "fix_commit": { "type": ["string", "null"] },
+          "retest_evidence": { "type": ["string", "null"] },
+          "closure_approver": { "type": ["string", "null"] },
+          "closed_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      }
+    }
+  }
+}

@@ -9,6 +9,7 @@ import {
   hashDomain,
   DOMAIN_TAGS,
   revocationCommitmentHash,
+  sha256Hex,
   ZERO_HASH
 } from "../crypto";
 import { buildInclusionProof, buildMerkleTree } from "../merkle";
@@ -23,8 +24,12 @@ import type {
   ReceiptCommitmentV1,
   RevocationV1,
   TrustAssessmentV1,
+  TrustAssessmentV2,
+  ScoringProfileV2,
+  EvidenceCoverageV1,
   AuditFindingV1
 } from "../types";
+import { scoringProfileV2Hash, trustAssessmentV2Hash } from "../v2";
 
 const { Pool } = pg;
 
@@ -85,7 +90,24 @@ export class PostgresRepository {
 
   async getIdentity(trustId: string): Promise<IdentityDocumentV1 | null> {
     const result = await this.pool.query("SELECT identity_document FROM trust_identities WHERE trust_id = $1", [trustId]);
-    return (result.rows[0]?.identity_document as IdentityDocumentV1 | undefined) ?? null;
+    const identity = (result.rows[0]?.identity_document as IdentityDocumentV1 | undefined) ?? null;
+    if (!identity) return null;
+    const keys = await this.pool.query(
+      "SELECT key_id, key_type, public_key, status, created_at, expires_at FROM verification_keys WHERE trust_id = $1 ORDER BY key_id",
+      [trustId]
+    );
+    if (keys.rows.length === 0) return identity;
+    return {
+      ...identity,
+      verification_methods: keys.rows.map((row) => ({
+        id: row.key_id,
+        type: row.key_type,
+        public_key: row.public_key,
+        status: row.status,
+        created_at: new Date(row.created_at).toISOString(),
+        ...(row.expires_at ? { expires_at: new Date(row.expires_at).toISOString() } : {})
+      }))
+    };
   }
 
   async getEvent(commitmentHash: Hex32): Promise<EventCommitmentV1 | null> {
@@ -97,6 +119,10 @@ export class PostgresRepository {
   async insertEvent(event: EventCommitmentV1, relayId: string, epochStartMs: number, epochDurationMs: number): Promise<Hex32> {
     const hash = commitmentHash(event);
     const shard = shardForTrustID(event.sender);
+    const closed = await this.pool.query("SELECT checkpoint_hash FROM checkpoints WHERE epoch_start_ms = $1 AND shard = $2 LIMIT 1", [epochStartMs, shard]);
+    if (closed.rows.length > 0) {
+      throw new Error("TSL_LOG_SEGMENT_CLOSED");
+    }
     await this.pool.query(
       `INSERT INTO event_commitments(
         commitment_hash, sender_trust_id, signing_key_id, event_class, content_commitment,
@@ -237,6 +263,201 @@ export class PostgresRepository {
     return hash;
   }
 
+  async upsertScoringProfileV2(profile: ScoringProfileV2): Promise<Hex32> {
+    const hash = scoringProfileV2Hash(profile);
+    await this.pool.query(
+      `INSERT INTO scoring_profiles_v2(
+        profile_id, provider_id, domain, model_version, profile_hash,
+        evaluation_report_commitment, issued_at, expires_at, canonical_body, signature
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      ON CONFLICT (profile_id) DO UPDATE SET
+        provider_id = EXCLUDED.provider_id,
+        domain = EXCLUDED.domain,
+        model_version = EXCLUDED.model_version,
+        profile_hash = EXCLUDED.profile_hash,
+        evaluation_report_commitment = EXCLUDED.evaluation_report_commitment,
+        issued_at = EXCLUDED.issued_at,
+        expires_at = EXCLUDED.expires_at,
+        canonical_body = EXCLUDED.canonical_body,
+        signature = EXCLUDED.signature`,
+      [
+        profile.profile_id,
+        profile.provider,
+        profile.domain,
+        profile.model_version,
+        hash,
+        profile.evaluation_report_commitment,
+        profile.issued_at,
+        profile.expires_at,
+        Buffer.from(canonicalBytes(profile)),
+        profile.signature
+      ]
+    );
+    return hash;
+  }
+
+  async getScoringProfileV2(profileId: string): Promise<ScoringProfileV2 | null> {
+    const result = await this.pool.query("SELECT canonical_body FROM scoring_profiles_v2 WHERE profile_id = $1", [profileId]);
+    const body = result.rows[0]?.canonical_body;
+    return body ? (JSON.parse(Buffer.from(body).toString("utf8")) as ScoringProfileV2) : null;
+  }
+
+  async listScoringProfilesV2(limit = 100): Promise<ScoringProfileV2[]> {
+    const result = await this.pool.query("SELECT canonical_body FROM scoring_profiles_v2 ORDER BY issued_at DESC LIMIT $1", [limit]);
+    return result.rows.map((row) => JSON.parse(Buffer.from(row.canonical_body).toString("utf8")) as ScoringProfileV2);
+  }
+
+  async upsertEvidenceCoverageV1(coverage: EvidenceCoverageV1): Promise<Hex32> {
+    const hash = sha256Hex(canonicalBytes(coverage));
+    await this.pool.query(
+      `INSERT INTO evidence_coverage_v1(
+        coverage_hash, subject_trust_id, signed_event_count, reciprocal_receipt_count,
+        unique_counterparty_count, trusted_counterparty_mass_bps, coverage_bps,
+        computed_at, canonical_body
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      ON CONFLICT (coverage_hash) DO UPDATE SET canonical_body = EXCLUDED.canonical_body`,
+      [
+        hash,
+        coverage.subject,
+        coverage.valid_signed_event_count,
+        coverage.valid_receipt_count,
+        coverage.unique_counterparty_count,
+        0,
+        coverage.coverage_bps,
+        coverage.computed_at,
+        Buffer.from(canonicalBytes(coverage))
+      ]
+    );
+    return hash;
+  }
+
+  async getEvidenceCoverageV1(coverageHash: Hex32): Promise<EvidenceCoverageV1 | null> {
+    const result = await this.pool.query("SELECT canonical_body FROM evidence_coverage_v1 WHERE coverage_hash = $1", [coverageHash]);
+    const body = result.rows[0]?.canonical_body;
+    return body ? (JSON.parse(Buffer.from(body).toString("utf8")) as EvidenceCoverageV1) : null;
+  }
+
+  async insertTrustAssessmentV2(assessment: TrustAssessmentV2): Promise<Hex32> {
+    const hash = trustAssessmentV2Hash(assessment);
+    await this.pool.query(
+      `INSERT INTO trust_assessments_v2(
+        assessment_hash, subject_trust_id, provider_id, profile_id, score_bps,
+        confidence_low_bps, confidence_high_bps, risk_label, evidence_coverage_hash,
+        evidence_commitment, issued_at, expires_at, canonical_body, signature
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      ON CONFLICT (assessment_hash) DO UPDATE SET canonical_body = EXCLUDED.canonical_body`,
+      [
+        hash,
+        assessment.subject,
+        assessment.issuer,
+        assessment.scoring_profile_id,
+        assessment.score_bps ?? null,
+        assessment.confidence_interval_bps?.[0] ?? null,
+        assessment.confidence_interval_bps?.[1] ?? null,
+        assessment.label,
+        assessment.evidence_coverage_commitment ?? null,
+        assessment.feature_vector_commitment ?? null,
+        assessment.issued_at,
+        assessment.expires_at,
+        Buffer.from(canonicalBytes(assessment)),
+        assessment.signature
+      ]
+    );
+    return hash;
+  }
+
+  async getTrustAssessmentV2(assessmentIdOrHash: string): Promise<TrustAssessmentV2 | null> {
+    const direct = await this.pool.query("SELECT canonical_body FROM trust_assessments_v2 WHERE assessment_hash = $1 LIMIT 1", [assessmentIdOrHash]);
+    const rows =
+      direct.rows.length > 0
+        ? direct.rows
+        : (await this.pool.query("SELECT canonical_body FROM trust_assessments_v2 ORDER BY issued_at DESC LIMIT 1000")).rows;
+    for (const row of rows) {
+      const assessment = JSON.parse(Buffer.from(row.canonical_body).toString("utf8")) as TrustAssessmentV2;
+      if (assessment.assessment_id === assessmentIdOrHash || trustAssessmentV2Hash(assessment) === assessmentIdOrHash) return assessment;
+    }
+    return null;
+  }
+
+  async upsertModelCardV2(modelCard: Record<string, unknown>): Promise<Hex32> {
+    const hash = sha256Hex(canonicalBytes(modelCard));
+    await this.pool.query(
+      `INSERT INTO model_cards_v2(
+        model_id, provider_id, model_version, model_card_hash, evaluation_report_commitment,
+        privacy_report_commitment, issued_at, canonical_body, signature
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      ON CONFLICT (model_id) DO UPDATE SET
+        provider_id = EXCLUDED.provider_id,
+        model_version = EXCLUDED.model_version,
+        model_card_hash = EXCLUDED.model_card_hash,
+        evaluation_report_commitment = EXCLUDED.evaluation_report_commitment,
+        privacy_report_commitment = EXCLUDED.privacy_report_commitment,
+        issued_at = EXCLUDED.issued_at,
+        canonical_body = EXCLUDED.canonical_body,
+        signature = EXCLUDED.signature`,
+      [
+        modelCard.model_id,
+        modelCard.provider,
+        modelCard.model_version,
+        hash,
+        modelCard.evaluation_report_commitment,
+        modelCard.privacy_report_commitment,
+        modelCard.issued_at,
+        Buffer.from(canonicalBytes(modelCard)),
+        modelCard.signature
+      ]
+    );
+    return hash;
+  }
+
+  async getModelCardV2(modelId: string): Promise<Record<string, unknown> | null> {
+    const result = await this.pool.query("SELECT canonical_body FROM model_cards_v2 WHERE model_id = $1", [modelId]);
+    const body = result.rows[0]?.canonical_body;
+    return body ? (JSON.parse(Buffer.from(body).toString("utf8")) as Record<string, unknown>) : null;
+  }
+
+  async upsertEvaluationReportV1(report: Record<string, unknown>): Promise<Hex32> {
+    const hash = sha256Hex(canonicalBytes(report));
+    const metrics = (report.metrics ?? {}) as Record<string, unknown>;
+    await this.pool.query(
+      `INSERT INTO evaluation_reports_v1(
+        report_id, model_id, domain, auroc_bps, auprc_bps, ece_bps, privacy_leakage_bps,
+        promotion_gate_result, issued_at, canonical_body, signature
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      ON CONFLICT (report_id) DO UPDATE SET
+        model_id = EXCLUDED.model_id,
+        domain = EXCLUDED.domain,
+        auroc_bps = EXCLUDED.auroc_bps,
+        auprc_bps = EXCLUDED.auprc_bps,
+        ece_bps = EXCLUDED.ece_bps,
+        privacy_leakage_bps = EXCLUDED.privacy_leakage_bps,
+        promotion_gate_result = EXCLUDED.promotion_gate_result,
+        issued_at = EXCLUDED.issued_at,
+        canonical_body = EXCLUDED.canonical_body,
+        signature = EXCLUDED.signature`,
+      [
+        report.report_id,
+        report.model_id,
+        report.domain,
+        metrics.auroc_bps ?? null,
+        metrics.auprc_bps ?? null,
+        metrics.ece_bps ?? null,
+        metrics.privacy_leakage_bps ?? null,
+        report.promotion_gate_result,
+        report.issued_at,
+        Buffer.from(canonicalBytes(report)),
+        report.signature
+      ]
+    );
+    return hash;
+  }
+
+  async getEvaluationReportV1(reportId: string): Promise<Record<string, unknown> | null> {
+    const result = await this.pool.query("SELECT canonical_body FROM evaluation_reports_v1 WHERE report_id = $1", [reportId]);
+    const body = result.rows[0]?.canonical_body;
+    return body ? (JSON.parse(Buffer.from(body).toString("utf8")) as Record<string, unknown>) : null;
+  }
+
   async insertAuditFinding(finding: AuditFindingV1): Promise<Hex32> {
     const hash = hashDomain(DOMAIN_TAGS.AUDIT_FINDING_V1, canonicalBytes(finding));
     await this.pool.query(
@@ -364,12 +585,25 @@ export class PostgresRepository {
     const assessment = await this.getLatestAssessmentForSubject(envelope.sender);
     return {
       type: "tsl.proof_bundle.v1",
-      ...(identity ? { identity } : {}),
+      bundle_id: commitment,
+      created_at: envelope.timestamp,
+      identity: identity ?? {
+        type: "tsl.identity.v1",
+        id: envelope.sender,
+        controller: envelope.sender,
+        created_at: envelope.timestamp,
+        verification_methods: []
+      },
       envelope,
       ...proof,
       receipts,
       attestations,
       revocations,
+      redaction_manifest: {
+        raw_content_included: false,
+        exact_counterparties_included: false,
+        metadata_fields_redacted: ["raw_content", "content_salt", "exact_counterparties", "platform", "ip_address", "user_agent"]
+      },
       ...(assessment ? { assessment } : {})
     };
   }
@@ -535,6 +769,10 @@ export class PostgresRepository {
   }
 
   async persistMerkleNodes(epochStartMs: number, shard: string, treeKind: "event" | "receipt" | "attestation" | "revocation", levels: Hex32[][]): Promise<void> {
+    const closed = await this.pool.query("SELECT checkpoint_hash FROM checkpoints WHERE epoch_start_ms = $1 AND shard = $2 LIMIT 1", [epochStartMs, shard]);
+    if (closed.rows.length > 0) {
+      throw new Error("TSL_LOG_SEGMENT_CLOSED");
+    }
     await this.pool.query("DELETE FROM merkle_nodes WHERE epoch_start_ms = $1 AND shard = $2 AND tree_kind = $3", [epochStartMs, shard, treeKind]);
     for (let level = 0; level < levels.length; level += 1) {
       for (let nodeIndex = 0; nodeIndex < levels[level].length; nodeIndex += 1) {
@@ -562,6 +800,10 @@ export class PostgresRepository {
   }
 
   async buildCheckpoint(epochStartMs: number, shard: string, epochDurationMs: number, relayId: string, relaySignature: string): Promise<BatchCheckpointV1> {
+    const closed = await this.pool.query("SELECT checkpoint_hash FROM checkpoints WHERE epoch_start_ms = $1 AND shard = $2 LIMIT 1", [epochStartMs, shard]);
+    if (closed.rows.length > 0) {
+      throw new Error("TSL_LOG_SEGMENT_CLOSED");
+    }
     await this.assignLogIndexes(epochStartMs, shard);
     const events = await this.pool.query(
       "SELECT commitment_hash FROM event_commitments WHERE epoch_start_ms = $1 AND shard = $2 ORDER BY log_index, accepted_at",

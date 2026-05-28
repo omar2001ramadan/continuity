@@ -1,0 +1,12 @@
+{
+  "type": "tsl.key_ceremony_record.v1",
+  "ceremony_id": "disaster-recovery-restore-test-2026-05-28",
+  "ceremony_class": "disaster_recovery",
+  "participants": ["did:tsl:ops:dr-lead", "did:tsl:security:key-custodian"],
+  "performed_at": "2026-05-28T12:30:00Z",
+  "key_identifier": "did:tsl:governance:backup#restore-test",
+  "action": "restore_test",
+  "artifacts": ["restore-transcript.txt", "checksum-report.txt", "operator-signoff.txt"],
+  "verification_checks": ["backup-restored", "signing-disabled-after-test", "checksums-matched"],
+  "signatures": ["0x00"]
+}

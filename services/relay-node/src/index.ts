@@ -63,19 +63,24 @@ export function createRelayNode() {
   const rateLimiter = new FixedWindowRateLimiter();
   const appealRecords: Array<Record<string, unknown>> = [];
   const evidenceRecords: Array<Record<string, unknown>> = [];
-  let migrated = false;
-  async function ensureDurableReady() {
-    if (repo && !migrated) {
-      await repo.migrate();
-      migrated = true;
-    }
-  }
   const store = new InMemoryRelayStore({
     relay_id: process.env.TSL_RELAY_ID ?? "did:tsl:relay:dev",
+    relay_signing_key_id: process.env.TSL_RELAY_SIGNING_KEY_ID ?? "#relay-checkpoint",
+    relay_signing_seed_hex: process.env.TSL_RELAY_SIGNING_SEED_HEX,
     epoch_duration_ms: Number(process.env.TSL_EPOCH_MS ?? 300000),
     timestamp_window_ms: Number(process.env.TSL_TIMESTAMP_WINDOW_MS ?? 600000),
     settlement_backend: settlementBackend
   });
+  let migrated = false;
+  async function ensureDurableReady() {
+    if (repo && !migrated) {
+      await repo.migrate();
+      for (const identity of store.identities()) {
+        await repo.upsertIdentity(identity);
+      }
+      migrated = true;
+    }
+  }
 
   const app = express();
   app.use(express.json({ limit: "1mb" }));
@@ -285,6 +290,11 @@ export function createRelayNode() {
         throw new RelayValidationError("TSL_SCHEMA_INVALID", "Rotation requires a valid rotation revocation with replacement_key", validation.errors);
       }
       assertTimestampInWindow(revocation.effective_at);
+      const identity = await resolver().resolveTrustID(revocation.trust_id, revocation.effective_at);
+      const key = identity ? findVerificationMethod(identity, revocation.revoked_key) ?? identity.verification_methods.find((method) => keyActiveAt(method, revocation.effective_at)) : null;
+      if (!key || key.type !== "ed25519" || !verifyEd25519(key.public_key, revocationHash(revocation), revocation.signature)) {
+        throw new RelayValidationError("TSL_REVOCATION_SIGNATURE_INVALID", "Rotation revocation signature failed verification");
+      }
       const revocationCommitment = revocationCommitmentHash(revocation);
       store.resolver.revokeKey(revocation.trust_id, revocation.revoked_key);
       await ensureDurableReady();
@@ -413,12 +423,24 @@ export function createRelayNode() {
           attestations: req.body.attestations,
           revocations: req.body.revocations,
           assessment: req.body.assessment,
+          assessment_v2: req.body.assessment_v2,
+          scoring_profile: req.body.scoring_profile,
+          domain_policy: req.body.domain_policy,
+          evidence_coverage: req.body.evidence_coverage,
+          metadata_fingerprints: req.body.metadata_fingerprints,
+          graph_profile: req.body.graph_profile,
+          graph_feature_vector: req.body.graph_feature_vector,
+          sybil_assessment: req.body.sybil_assessment,
+          drift_report: req.body.drift_report,
           zk_proofs: req.body.zk_proofs,
           delegations: req.body.delegations,
+          delegation_policies: req.body.delegation_policies,
+          agent_actions: req.body.agent_actions,
           audit_findings: req.body.audit_findings,
           consistency_proofs: req.body.consistency_proofs,
           non_membership_proofs: req.body.non_membership_proofs,
-          governance_policy: req.body.governance_policy
+          governance_policy: req.body.governance_policy,
+          disclosure_consents: req.body.disclosure_consents
         },
         resolver,
         req.body.policy ?? {
@@ -449,10 +471,13 @@ export function createRelayNode() {
           agent_actions: req.body.agent_actions
         },
         resolver,
-        { require_agent_scope: req.body.require_agent_scope ?? "inside_scope", require_settlement: Boolean(req.body.require_settlement) },
+        {
+          ...(req.body.delegations?.length ? { require_agent_scope: req.body.require_agent_scope ?? "inside_scope" } : {}),
+          require_settlement: Boolean(req.body.require_settlement)
+        },
         settlementBackend ?? undefined
       );
-      res.status(result.checks.agent_scope_valid ? 200 : 422).json(result);
+      res.status(result.checks.delegated_action_valid || result.checks.agent_scope_valid ? 200 : 422).json(result);
     } catch (error) {
       sendRelayError(res, error);
     }

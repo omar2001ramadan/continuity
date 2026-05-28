@@ -70,6 +70,9 @@
     "raw_content_included": false,
     "exact_counterparties_included": false,
     "metadata_fields_redacted": [
+      "raw_content",
+      "content_salt",
+      "exact_counterparties",
       "platform",
       "ip_address",
       "user_agent"

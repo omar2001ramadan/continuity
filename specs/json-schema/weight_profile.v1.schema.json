@@ -1,0 +1,16 @@
+{
+  "$id": "https://spec.tsl.network/schemas/weight_profile.v1.schema.json",
+  "type": "object",
+  "required": ["type", "profile_id", "weights_bps", "issued_at"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.weight_profile.v1" },
+    "profile_id": { "type": "string" },
+    "weights_bps": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 10000 }
+    },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

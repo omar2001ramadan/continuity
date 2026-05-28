@@ -65,6 +65,62 @@
       "minimum": 0,
       "maximum": 10000
     },
+    "community_algorithm_id": {
+      "type": "string"
+    },
+    "community_escape_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "community_diversity_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "conductance_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "trusted_neighbor_mass_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "trusted_seed_distance_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "adversarial_seed_distance_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "pagerank_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "ppr_lite_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "modularity_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "community_pass_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "recomputation_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
     "privacy_disclosure_level": {
       "enum": [
         "aggregate_only",

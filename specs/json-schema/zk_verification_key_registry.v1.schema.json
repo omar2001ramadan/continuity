@@ -1,0 +1,28 @@
+{
+  "$id": "https://spec.tsl.network/schemas/zk_verification_key_registry.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "registry_id",
+    "active_manifest_hashes",
+    "revoked_manifest_hashes",
+    "issued_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.zk.verification_key_registry.v1" },
+    "registry_id": { "type": "string" },
+    "active_manifest_hashes": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+      "uniqueItems": true
+    },
+    "revoked_manifest_hashes": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+      "uniqueItems": true
+    },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

@@ -6,7 +6,23 @@ from nacl.exceptions import BadSignatureError
 
 
 def canonicalize(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        if abs(value) > 2**53 - 1:
+            raise ValueError("TSL canonicalization only allows safe integers in signed core objects")
+        return str(value)
+    if isinstance(value, float):
+        raise ValueError("TSL canonicalization only allows safe integers in signed core objects")
+    if isinstance(value, list):
+        return "[" + ",".join(canonicalize(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ",".join(json.dumps(str(key), ensure_ascii=False) + ":" + canonicalize(value[key]) for key in sorted(value)) + "}"
+    raise TypeError(f"Unsupported value in TSL canonicalization: {type(value).__name__}")
 
 
 def hash_domain(tag: str, payload: bytes) -> str:
@@ -18,7 +34,8 @@ def sha256_hex(payload: bytes) -> str:
 
 
 DETERMINISTIC_EVENT_HASH = "0xcf5cb36e4596ed4c446f2d24504407369a1fc4862928e86c340ec5270fcc3267"
-DETERMINISTIC_COMMITMENT_HASH = "0x174c377613f1fa94acc95d32408095c27330f5dfa088ee40cdcb81a503b25bb5"
+DETERMINISTIC_COMMITMENT_HASH = "0xcc680d3c19dbbb9785640355a4756a498fb887c643dc04ef304689955381251d"
+DETERMINISTIC_LEGACY_COMMITMENT_HASH = "0x174c377613f1fa94acc95d32408095c27330f5dfa088ee40cdcb81a503b25bb5"
 
 
 def _hex_to_bytes(value: str) -> bytes:
@@ -30,6 +47,10 @@ def _uint64be(value: int) -> bytes:
 
 
 def commitment_hash(event_hash: str, signature: str) -> str:
+    return hash_domain("tsl.commitment.v1", _hex_to_bytes(event_hash) + _hex_to_bytes(signature))
+
+
+def legacy_commitment_hash(event_hash: str, signature: str) -> str:
     return sha256_hex(_hex_to_bytes(event_hash) + _hex_to_bytes(signature))
 
 

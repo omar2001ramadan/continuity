@@ -1,9 +1,10 @@
 import { canonicalize, withoutField } from "./canonicalize";
-import { DOMAIN_TAGS, ZERO_HASH, commitmentHash, hashDomain, sha256Hex } from "./crypto";
+import { buildIdentityFromSeed } from "./commitments";
+import { DOMAIN_TAGS, ZERO_HASH, commitmentHash, hashDomain, sha256Hex, signEd25519 } from "./crypto";
 import { MemoryTrustResolver } from "./identity";
 import { buildInclusionProof, buildMerkleTree } from "./merkle";
 import type { SettlementBackend } from "./settlement";
-import type { BatchCheckpointV1, EventCommitmentV1, Hex32, IdentityDocumentV1, InclusionProofV1, TrustID } from "./types";
+import type { BatchCheckpointV1, EventCommitmentV1, Hex32, HexSig, IdentityDocumentV1, InclusionProofV1, TrustID } from "./types";
 import { validateSchema } from "./validation";
 import { verifyTSL } from "./verifier";
 
@@ -20,6 +21,8 @@ export interface AcceptedEvent {
 
 export interface RelayStoreOptions {
   relay_id?: TrustID;
+  relay_signing_key_id?: string;
+  relay_signing_seed_hex?: string;
   epoch_duration_ms?: number;
   timestamp_window_ms?: number;
   settlement_backend?: SettlementBackend | null;
@@ -38,18 +41,31 @@ export class RelayValidationError extends Error {
 export class InMemoryRelayStore {
   readonly resolver = new MemoryTrustResolver();
   readonly relay_id: TrustID;
+  readonly relay_identity: IdentityDocumentV1 | null;
   readonly epoch_duration_ms: number;
   readonly timestamp_window_ms: number;
   readonly settlement_backend: SettlementBackend | null;
+  private readonly relay_signing_seed_hex?: string;
   private readonly events = new Map<Hex32, AcceptedEvent>();
   private readonly nonces = new Set<string>();
   private readonly settledCheckpoints = new Map<string, BatchCheckpointV1>();
+  private readonly closedSegments = new Map<string, Hex32[]>();
 
   constructor(options: RelayStoreOptions = {}) {
     this.relay_id = options.relay_id ?? "did:tsl:relay:dev";
+    this.relay_signing_seed_hex = options.relay_signing_seed_hex;
+    this.relay_identity = options.relay_signing_seed_hex
+      ? buildIdentityFromSeed({
+          trust_id: this.relay_id,
+          key_id: options.relay_signing_key_id ?? "#relay-checkpoint",
+          seed_hex: options.relay_signing_seed_hex,
+          created_at: "2026-01-01T00:00:00Z"
+        })
+      : null;
     this.epoch_duration_ms = options.epoch_duration_ms ?? 300000;
     this.timestamp_window_ms = options.timestamp_window_ms ?? 600000;
     this.settlement_backend = options.settlement_backend ?? null;
+    if (this.relay_identity) this.resolver.upsertIdentity(this.relay_identity);
   }
 
   upsertIdentity(identity: IdentityDocumentV1): void {
@@ -86,6 +102,10 @@ export class InMemoryRelayStore {
 
     const epochStart = Math.floor(eventTime / this.epoch_duration_ms) * this.epoch_duration_ms;
     const shard = shardForTrustID(event.sender);
+    const segmentKey = checkpointStoreKey(epochStart, shard);
+    if (this.closedSegments.has(segmentKey)) {
+      throw new RelayValidationError("TSL_LOG_SEGMENT_CLOSED", "Cannot append to a checkpointed epoch/shard segment");
+    }
     const logIndex = this.eventsFor(epochStart, shard).length;
 
     const accepted: AcceptedEvent = {
@@ -112,8 +132,8 @@ export class InMemoryRelayStore {
     const accepted = this.events.get(commitment);
     if (!accepted) return null;
 
-    const sameShard = this.eventsFor(accepted.epoch_start_ms, accepted.shard);
-    const commitments = sameShard.map((item) => item.commitment_hash);
+    const segmentKey = checkpointStoreKey(accepted.epoch_start_ms, accepted.shard);
+    const commitments = this.closedSegments.get(segmentKey) ?? this.eventsFor(accepted.epoch_start_ms, accepted.shard).map((item) => item.commitment_hash);
     const checkpoint = this.checkpointFor(accepted.epoch_start_ms, accepted.shard);
     const proof = buildInclusionProof({
       commitments,
@@ -134,7 +154,7 @@ export class InMemoryRelayStore {
 
     const commitments = this.eventsFor(epoch_start_ms, shard).map((item) => item.commitment_hash);
     const eventTree = buildMerkleTree(commitments);
-    return {
+    const checkpoint: BatchCheckpointV1 = {
       type: "tsl.batch_checkpoint.v1",
       epoch_start_ms,
       epoch_duration_ms: this.epoch_duration_ms,
@@ -147,6 +167,10 @@ export class InMemoryRelayStore {
       receipt_count: 0,
       previous_checkpoint: ZERO_HASH,
       relay_id: this.relay_id,
+      relay_signature: "0x00"
+    };
+    return this.relay_signing_seed_hex ? signCheckpointWithSeed(checkpoint, this.relay_signing_seed_hex) : {
+      ...checkpoint,
       relay_signature: pseudoRelaySignature({
         epoch_start_ms,
         shard,
@@ -161,7 +185,13 @@ export class InMemoryRelayStore {
     }
     const checkpoint = this.checkpointFor(epoch_start_ms, shard);
     const settled = await this.settlement_backend.submitCheckpoint(checkpoint);
-    this.settledCheckpoints.set(checkpointStoreKey(epoch_start_ms, shard), settled);
+    const segmentKey = checkpointStoreKey(epoch_start_ms, shard);
+    const existing = this.settledCheckpoints.get(segmentKey);
+    if (existing && checkpointHash(existing) !== checkpointHash(settled)) {
+      throw new RelayValidationError("TSL_CHECKPOINT_CONFLICT", "Conflicting checkpoint for closed epoch/shard segment");
+    }
+    this.closedSegments.set(segmentKey, this.eventsFor(epoch_start_ms, shard).map((item) => item.commitment_hash));
+    this.settledCheckpoints.set(segmentKey, settled);
     return structuredClone(settled);
   }
 
@@ -172,7 +202,7 @@ export class InMemoryRelayStore {
   }
 
   identities(): IdentityDocumentV1[] {
-    return [];
+    return this.relay_identity ? [structuredClone(this.relay_identity)] : [];
   }
 }
 
@@ -189,6 +219,11 @@ export function checkpointHash(checkpoint: BatchCheckpointV1): Hex32 {
   payload = withoutField(payload, "settlement_backend");
   payload = withoutField(payload, "settlement_tx");
   return hashDomain(DOMAIN_TAGS.CHECKPOINT_V1, new TextEncoder().encode(canonicalize(payload)));
+}
+
+export function signCheckpointWithSeed(checkpoint: BatchCheckpointV1, seedHex: string): BatchCheckpointV1 {
+  const unsigned: BatchCheckpointV1 = { ...checkpoint, relay_signature: "0x00" };
+  return { ...checkpoint, relay_signature: signEd25519(checkpointHash(unsigned), seedHex) as HexSig };
 }
 
 function pseudoRelaySignature(input: Record<string, unknown>): `0x${string}` {

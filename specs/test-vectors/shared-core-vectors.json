@@ -3,8 +3,10 @@
     "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
     "event_hash_hex": "0xcf5cb36e4596ed4c446f2d24504407369a1fc4862928e86c340ec5270fcc3267",
     "signature_hex": "0xd3187ac9861b87a3b5f871c9ae9a6426ce0c1e49cee1978c767bf99eff6c94467b6955cd9821c2a7e3bfcf945b576e49d81deccb4e7c8b0624917fd794f1ff08",
-    "commitment_hash_hex": "0x174c377613f1fa94acc95d32408095c27330f5dfa088ee40cdcb81a503b25bb5",
-    "single_leaf_merkle_root_hex": "0xc09632a2beaaf0c4702e673a7a1661673c80be478f1136b60677f38c5bb5914f"
+    "commitment_hash_hex": "0xcc680d3c19dbbb9785640355a4756a498fb887c643dc04ef304689955381251d",
+    "legacy_commitment_hash_hex": "0x174c377613f1fa94acc95d32408095c27330f5dfa088ee40cdcb81a503b25bb5",
+    "single_leaf_merkle_root_hex": "0x2af3150c9d8e62aac337ef020e3f5d07a7529116e59eba6b152ffb3570e611d7",
+    "legacy_single_leaf_merkle_root_hex": "0xc09632a2beaaf0c4702e673a7a1661673c80be478f1136b60677f38c5bb5914f"
   },
   "zk": {
     "claim": "identity_age_days",

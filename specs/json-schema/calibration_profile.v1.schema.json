@@ -1,0 +1,25 @@
+{
+  "$id": "https://spec.tsl.network/schemas/calibration_profile.v1.schema.json",
+  "type": "object",
+  "required": ["type", "profile_id", "points", "issued_at"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.calibration_profile.v1" },
+    "profile_id": { "type": "string" },
+    "points": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["raw_bps", "calibrated_bps"],
+        "additionalProperties": false,
+        "properties": {
+          "raw_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+          "calibrated_bps": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        }
+      }
+    },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

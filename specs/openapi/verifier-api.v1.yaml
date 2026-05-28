@@ -2,10 +2,104 @@ openapi: 3.1.0
 info:
   title: TSL Verifier API
   version: 0.1.0
+security:
+  - bearerAuth: []
 paths:
   /v1/verify:
     post:
       summary: Verify protocol proof material using the pure verifier library.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyTSLInput'
       responses:
-        "200": { description: Verified }
-        "422": { description: Verification failed }
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationResult'
+        "422":
+          description: Verification failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Optional verifier access token for hosted deployments.
+  schemas:
+    Hex32:
+      type: string
+      pattern: '^0x[0-9a-f]{64}$'
+    ErrorResponse:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code:
+              type: string
+              enum:
+                - TSL_SCHEMA_INVALID
+                - TSL_SIGNATURE_INVALID
+                - TSL_CHECKPOINT_INVALID
+                - TSL_DISCLOSURE_CONSENT_MISSING
+                - TSL_GRAPH_ARTIFACTS_INVALID
+                - TSL_DELEGATION_SCOPE_VIOLATION
+            message:
+              type: string
+    VerifyTSLInput:
+      type: object
+      required: [envelope]
+      additionalProperties: true
+      properties:
+        envelope:
+          $ref: '../json-schema/event_commitment.v1.schema.json'
+        proof:
+          $ref: '../json-schema/inclusion_proof.v1.schema.json'
+        checkpoint:
+          $ref: '../json-schema/batch_checkpoint.v1.schema.json'
+        proof_bundle:
+          $ref: '../json-schema/proof_bundle.v1.schema.json'
+        assessment_v2:
+          $ref: '../json-schema/trust_assessment.v2.schema.json'
+        graph_profile:
+          $ref: '../json-schema/graph_profile.v2.schema.json'
+        graph_feature_vector:
+          $ref: '../json-schema/graph_feature_vector.v1.schema.json'
+        sybil_assessment:
+          $ref: '../json-schema/sybil_assessment.v1.schema.json'
+        drift_report:
+          $ref: '../json-schema/drift_report.v1.schema.json'
+        delegation_policies:
+          type: array
+          items:
+            $ref: '../json-schema/delegation_policy.v2.schema.json'
+        agent_actions:
+          type: array
+          items:
+            $ref: '../json-schema/agent_action.v2.schema.json'
+    VerificationResult:
+      type: object
+      required: [verified, checks, errors]
+      additionalProperties: true
+      properties:
+        verified:
+          type: boolean
+        checks:
+          type: object
+          additionalProperties: true
+        errors:
+          type: array
+          items:
+            type: string

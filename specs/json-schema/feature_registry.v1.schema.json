@@ -1,0 +1,13 @@
+{
+  "$id": "https://spec.tsl.network/schemas/feature_registry.v1.schema.json",
+  "type": "object",
+  "required": ["type", "registry_id", "feature_ids", "issued_at"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.feature_registry.v1" },
+    "registry_id": { "type": "string" },
+    "feature_ids": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

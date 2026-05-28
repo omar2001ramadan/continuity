@@ -3,9 +3,10 @@ import {
   signMessageEvent,
   buildIdentityFromSeed,
   buildInclusionProof,
-  ZERO_HASH,
-  type ProofBundleV1
-} from "../../core-ts/src/index";
+	  ZERO_HASH,
+	  type DisclosureConsentV1,
+	  type ProofBundleV1
+	} from "../../core-ts/src/index";
 
 export function encodeProofLink(bundle: ProofBundleV1, baseUrl = "http://localhost:8090/p/"): string {
   const payload = Buffer.from(JSON.stringify(bundle), "utf8").toString("base64url");
@@ -22,6 +23,8 @@ export function createSignedMessageProof(input: {
   key_id: string;
   seed_hex: string;
   message: string;
+  include_message_disclosure?: boolean;
+  disclosure_consent?: DisclosureConsentV1;
 }): ProofBundleV1 & { proof_link: string } {
   const identity = buildIdentityFromSeed({ trust_id: input.trust_id, key_id: input.key_id, seed_hex: input.seed_hex });
   const signed = signMessageEvent({
@@ -40,6 +43,13 @@ export function createSignedMessageProof(input: {
     epoch_duration_ms: epochDurationMs,
     shard: "local"
   });
+  const mayDiscloseMessage =
+    input.include_message_disclosure === true &&
+    disclosureConsentAllows({
+      consent: input.disclosure_consent,
+      subject: input.trust_id,
+      field_classes: ["raw_content", "content_salt"]
+    });
   const bundle: ProofBundleV1 = {
     type: "tsl.proof_bundle.v1",
     bundle_id: signed.commitment_hash,
@@ -61,18 +71,38 @@ export function createSignedMessageProof(input: {
       previous_checkpoint: ZERO_HASH,
       relay_id: "did:tsl:relay:local",
       relay_signature: "0x00"
-    },
-    redaction_manifest: {
-      raw_content_included: true,
-      exact_counterparties_included: false,
-      metadata_fields_redacted: ["platform", "ip_address", "user_agent"]
-    },
-    message_disclosure: {
-      raw_message: input.message,
-      content_salt: signed.content_salt
-    }
-  };
+	    },
+	    redaction_manifest: {
+	      raw_content_included: mayDiscloseMessage,
+	      exact_counterparties_included: false,
+	      metadata_fields_redacted: mayDiscloseMessage ? ["platform", "ip_address", "user_agent"] : ["raw_content", "content_salt", "platform", "ip_address", "user_agent"]
+	    },
+	    ...(mayDiscloseMessage
+	      ? {
+	          message_disclosure: {
+	            raw_message: input.message,
+	            content_salt: signed.content_salt
+	          }
+	        }
+	      : {})
+	  };
   return { ...bundle, proof_link: encodeProofLink(bundle) };
+}
+
+export function disclosureConsentAllows(input: {
+  consent?: DisclosureConsentV1 | null;
+  subject: string;
+  field_classes: string[];
+  at_time_ms?: number;
+  revoked?: boolean;
+}): boolean {
+  if (!input.consent || input.revoked === true) return false;
+  const now = input.at_time_ms ?? Date.now();
+  if (input.consent.subject !== input.subject) return false;
+  if (Date.parse(input.consent.issued_at) > now || Date.parse(input.consent.expires_at) <= now) return false;
+  const allowed = new Set(input.consent.allowed_field_classes);
+  const forbidden = new Set(input.consent.forbidden_field_classes);
+  return input.field_classes.every((field) => allowed.has(field) && !forbidden.has(field));
 }
 
 export class EncryptedLocalStore {
@@ -136,6 +166,14 @@ export class NodeSqliteLocalStore {
         key TEXT PRIMARY KEY,
         value_encrypted TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS disclosure_consents (
+        consent_key TEXT PRIMARY KEY,
+        subject TEXT NOT NULL,
+        verifier_or_provider TEXT NOT NULL,
+        revocation_pointer TEXT NOT NULL,
+        consent_encrypted TEXT NOT NULL,
+        revoked_at INTEGER
+      );
     `);
     return new NodeSqliteLocalStore(db, new EncryptedLocalStore(passphrase));
   }
@@ -151,6 +189,36 @@ export class NodeSqliteLocalStore {
     if (!row?.value_encrypted) return null;
     (this.crypto as unknown as { records: Map<string, string> }).records.set(key, row.value_encrypted);
     return this.crypto.get<T>(key);
+  }
+
+  storeDisclosureConsent(consent: DisclosureConsentV1): void {
+    const key = `${consent.subject}:${consent.verifier_or_provider}:${consent.revocation_pointer}`;
+    this.crypto.set(`disclosure_consent:${key}`, consent);
+    const encrypted = (this.crypto as unknown as { records: Map<string, string> }).records.get(`disclosure_consent:${key}`);
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO disclosure_consents(consent_key, subject, verifier_or_provider, revocation_pointer, consent_encrypted, revoked_at) VALUES (?, ?, ?, ?, ?, COALESCE((SELECT revoked_at FROM disclosure_consents WHERE consent_key = ?), NULL))"
+      )
+      .run(key, consent.subject, consent.verifier_or_provider, consent.revocation_pointer, encrypted, key);
+  }
+
+  getDisclosureConsent(subject: string, verifierOrProvider: string, revocationPointer: string): DisclosureConsentV1 | null {
+    const key = `${subject}:${verifierOrProvider}:${revocationPointer}`;
+    const row = this.db.prepare("SELECT consent_encrypted FROM disclosure_consents WHERE consent_key = ?").get(key);
+    if (!row?.consent_encrypted) return null;
+    (this.crypto as unknown as { records: Map<string, string> }).records.set(`disclosure_consent:${key}`, row.consent_encrypted);
+    return this.crypto.get<DisclosureConsentV1>(`disclosure_consent:${key}`);
+  }
+
+  revokeDisclosureConsent(subject: string, verifierOrProvider: string, revocationPointer: string, revokedAtMs = Date.now()): void {
+    const key = `${subject}:${verifierOrProvider}:${revocationPointer}`;
+    this.db.prepare("UPDATE disclosure_consents SET revoked_at = ? WHERE consent_key = ?").run(revokedAtMs, key);
+  }
+
+  isDisclosureConsentRevoked(subject: string, verifierOrProvider: string, revocationPointer: string): boolean {
+    const key = `${subject}:${verifierOrProvider}:${revocationPointer}`;
+    const row = this.db.prepare("SELECT revoked_at FROM disclosure_consents WHERE consent_key = ?").get(key);
+    return row?.revoked_at !== null && row?.revoked_at !== undefined;
   }
 }
 

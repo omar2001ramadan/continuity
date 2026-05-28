@@ -5,8 +5,11 @@ import { Command } from "commander";
 import { createSignedMessageProof, decodeProofLink, encodeProofLink, NodeSqliteLocalStore } from "../../../packages/client-sdk-ts/src/index";
 import {
   ZERO_HASH,
+  agentActionV2Hash,
+  buildAgentActionV2,
   buildConsistencyProof,
   buildAgentDelegation,
+  buildDelegationPolicyV2,
   buildGroth16ThresholdProof,
   buildIdentityFromSeed,
   buildRevocation,
@@ -15,11 +18,15 @@ import {
   buildMerkleTree,
   buildNonMembershipProof,
   checkpointHash,
+  canonicalBytes,
   createSettlementBackendFromEnv,
   deriveEd25519PublicKey,
   InMemoryRelayStore,
   LocalEvmSettlementBackend,
   randomHex32,
+  hashDomain,
+  sha256Hex,
+  signAgentActionV2,
   signAgentDelegation,
   signAuditFinding,
   signGovernancePolicy,
@@ -33,7 +40,12 @@ import {
   verifyThresholdProof,
   verifyThresholdProofAsync,
   verifyTSL,
+  delegationPolicyV2Hash,
+  signDelegationPolicyV2,
+  verifyDelegatedAgentActionV0,
+  type AgentActionV2,
   type BatchCheckpointV1,
+  type DelegationPolicyV2,
   type Hex32,
   type IdentityDocumentV1,
   type GovernancePolicyUnsignedV1,
@@ -141,9 +153,10 @@ function deterministicBundle() {
     envelope: signed.envelope,
     proof,
     checkpoint,
-    message_disclosure: {
-      raw_message: VECTOR.message,
-      content_salt: VECTOR.contentSaltHex
+    redaction_manifest: {
+      raw_content_included: false,
+      exact_counterparties_included: false,
+      metadata_fields_redacted: ["raw_content", "content_salt", "exact_counterparties", "platform", "ip_address", "user_agent"]
     },
     vector: {
       public_key_hex: deriveEd25519PublicKey(VECTOR.seedHex),
@@ -255,11 +268,7 @@ program
       {
         envelope: signed.envelope,
         proof: beforeSettlement.proof,
-        checkpoint: beforeSettlement.checkpoint,
-        message_disclosure: {
-          raw_message: VECTOR.message,
-          content_salt: VECTOR.contentSaltHex
-        }
+        checkpoint: beforeSettlement.checkpoint
       },
       store.resolver,
       { require_inclusion: true, require_checkpoint: true, require_settlement: true },
@@ -274,11 +283,7 @@ program
       {
         envelope: signed.envelope,
         proof: afterSettlement.proof,
-        checkpoint: afterSettlement.checkpoint,
-        message_disclosure: {
-          raw_message: VECTOR.message,
-          content_salt: VECTOR.contentSaltHex
-        }
+        checkpoint: afterSettlement.checkpoint
       },
       store.resolver,
       { require_inclusion: true, require_checkpoint: true, require_settlement: true },
@@ -582,7 +587,7 @@ program
 
 program
   .command("agent:delegate")
-  .description("Create a signed agent delegation")
+  .description("Create a signed legacy agent_delegation.v1 object")
   .requiredOption("--controller <trustId>", "controller TrustID")
   .requiredOption("--controller-key-id <keyId>", "controller key id")
   .requiredOption("--controller-seed-hex <hex>", "controller Ed25519 seed")
@@ -607,6 +612,115 @@ program
       options.agentSeedHex
     );
     printJson({ delegation });
+  });
+
+program
+  .command("delegation:v2:create")
+  .description("Create and sign a delegation_policy.v2 object")
+  .requiredOption("--principal <trustId>", "principal TrustID")
+  .requiredOption("--principal-seed-hex <hex>", "principal Ed25519 seed")
+  .requiredOption("--delegate <trustId>", "delegate TrustID")
+  .requiredOption("--actions <actions>", "comma-separated allowed actions")
+  .requiredOption("--resources <resources>", "comma-separated allowed resources")
+  .requiredOption("--valid-from <rfc3339>", "policy validity start")
+  .requiredOption("--valid-until <rfc3339>", "policy validity end")
+  .requiredOption("--revocation-pointer <pointer>", "revocation pointer")
+  .option("--effect <allow|deny>", "policy effect", "allow")
+  .option("--constraints <json>", "constraints JSON", "{}")
+  .option("--subdelegation <json>", "subdelegation JSON; default deny if omitted")
+  .option("--parent-policy-id <hex32>", "parent policy id for subdelegation")
+  .option("--nonce <hex32>", "policy nonce")
+  .action((options) => {
+    const policy = signDelegationPolicyV2(
+      buildDelegationPolicyV2({
+        principal: options.principal,
+        delegate: options.delegate,
+        effect: options.effect,
+        actions: String(options.actions).split(",").map((item) => item.trim()).filter(Boolean),
+        resources: String(options.resources).split(",").map((item) => item.trim()).filter(Boolean),
+        constraints: JSON.parse(options.constraints),
+        ...(options.subdelegation ? { subdelegation: JSON.parse(options.subdelegation) } : {}),
+        ...(options.parentPolicyId ? { parent_policy_id: options.parentPolicyId as Hex32 } : {}),
+        valid_from: options.validFrom,
+        valid_until: options.validUntil,
+        revocation_pointer: options.revocationPointer,
+        ...(options.nonce ? { nonce: options.nonce as Hex32 } : {})
+      }),
+      options.principalSeedHex
+    );
+    printJson({ policy, policy_hash: delegationPolicyV2Hash(policy) });
+  });
+
+program
+  .command("agent:v2:sign-action")
+  .description("Sign an agent_action.v2 object")
+  .requiredOption("--agent <trustId>", "agent TrustID")
+  .requiredOption("--principal <trustId>", "principal TrustID")
+  .requiredOption("--agent-seed-hex <hex>", "agent Ed25519 seed")
+  .requiredOption("--action <action>", "action name")
+  .requiredOption("--resource <resource>", "resource id or URI")
+  .requiredOption("--delegation-chain-file <file>", "delegation_policy.v2 array or wrapper JSON")
+  .option("--parameters <json>", "disclosed parameters JSON", "{}")
+  .option("--tool <tool>", "tool name")
+  .option("--value-minor-units <n>", "minor-unit value")
+  .option("--human-approval-proof <proof>", "human approval proof")
+  .option("--issued-at <rfc3339>", "action issuance time")
+  .option("--nonce <hex32>", "action nonce")
+  .action((options) => {
+    const chainPayload = readJsonFile<Record<string, unknown>>(options.delegationChainFile);
+    const chain = ((chainPayload.delegation_chain ?? chainPayload.policies ?? chainPayload.delegation_policies ?? chainPayload) as DelegationPolicyV2[]).map((policy) => policy);
+    const parameters = JSON.parse(options.parameters);
+    const delegationChainRoot = sha256Hex(canonicalBytes(chain.map((policy) => delegationPolicyV2Hash(policy))));
+    const action = signAgentActionV2(
+      buildAgentActionV2({
+        agent: options.agent,
+        principal: options.principal,
+        action: options.action,
+        resource: options.resource,
+        ...(options.tool ? { tool: options.tool } : {}),
+        parameters_commitment: hashDomain("tsl.agent.parameters.v1", canonicalBytes(parameters)),
+        parameter_disclosure_policy: "selective",
+        delegation_chain_root: delegationChainRoot,
+        nonce: (options.nonce ?? randomHex32()) as Hex32,
+        ...(options.valueMinorUnits !== undefined ? { value_minor_units: Number(options.valueMinorUnits) } : {}),
+        ...(options.humanApprovalProof ? { human_approval_proof: options.humanApprovalProof } : {}),
+        issued_at: options.issuedAt
+      }),
+      options.agentSeedHex
+    );
+    printJson({ action, action_hash: agentActionV2Hash(action), parameters });
+  });
+
+program
+  .command("agent:v2:verify")
+  .description("Verify agent_action.v2 against delegation_policy.v2 chain")
+  .requiredOption("--action-file <file>", "agent_action.v2 JSON or wrapper")
+  .requiredOption("--delegation-chain-file <file>", "delegation_policy.v2 array or wrapper JSON")
+  .requiredOption("--identity-file <file...>", "identity JSON file(s) for principal and agent keys")
+  .option("--parameters <json>", "disclosed parameters JSON")
+  .option("--revoked-policy-ids <ids>", "comma-separated revoked policy ids")
+  .option("--revoked-pointers <pointers>", "comma-separated revoked pointers")
+  .action((options) => {
+    const actionPayload = readJsonFile<Record<string, unknown>>(options.actionFile);
+    const action = (actionPayload.action ?? actionPayload) as AgentActionV2;
+    const chainPayload = readJsonFile<Record<string, unknown>>(options.delegationChainFile);
+    const chain = (chainPayload.delegation_chain ?? chainPayload.policies ?? chainPayload.delegation_policies ?? chainPayload) as DelegationPolicyV2[];
+    const identities = (options.identityFile as string[]).map((file) => readJsonFile<IdentityDocumentV1>(file));
+    const publicKeys: Record<string, string> = {};
+    for (const identity of identities) {
+      const key = identity.verification_methods.find((method) => method.type === "ed25519" && method.status === "active");
+      if (key) publicKeys[identity.id] = key.public_key;
+    }
+    const result = verifyDelegatedAgentActionV0({
+      action,
+      delegation_chain: chain,
+      public_keys: publicKeys,
+      parameters: options.parameters ? JSON.parse(options.parameters) : undefined,
+      revoked_policy_ids: options.revokedPolicyIds ? String(options.revokedPolicyIds).split(",") as Hex32[] : undefined,
+      revoked_pointers: options.revokedPointers ? String(options.revokedPointers).split(",") : undefined
+    });
+    printJson({ status: result.ok ? "agent_inside_scope" : "agent_outside_scope", result });
+    if (!result.ok) process.exitCode = 1;
   });
 
 program

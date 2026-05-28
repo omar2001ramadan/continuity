@@ -1,0 +1,15 @@
+{
+  "type": "tsl.integration_evidence.cli_sidecar_v2_smoke.v1",
+  "status": "passed",
+  "generated_at": "2026-05-28T21:25:28.192Z",
+  "cli": {
+    "policy_hash": "0xb18874b756731859e4b3d572537604176a7c7835c65c011c631ac3c3558aae01",
+    "action_hash": "0xc52fc14bcc5363092a5e9d9dcefcf19845f949df8809df6e0829500a2a85bd08",
+    "inside_status": "agent_inside_scope",
+    "outside_status": "agent_outside_scope",
+    "outside_error_code": "TSL_DELEGATION_CONSTRAINT_VIOLATION"
+  },
+  "sidecar": {
+    "inside_status": "agent_inside_scope"
+  }
+}

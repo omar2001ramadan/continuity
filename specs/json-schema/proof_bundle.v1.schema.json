@@ -72,10 +72,49 @@
         "type": "object"
       }
     },
+    "zk_circuit_manifests": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "zk_verification_key_registry": {
+      "type": "object"
+    },
     "delegations": {
       "type": "array",
       "items": {
         "type": "object"
+      }
+    },
+    "delegation_policies": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "agent_actions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "disclosure_consents": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "message_disclosure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "raw_message": {
+          "type": "string"
+        },
+        "content_salt": {
+          "type": "string"
+        }
       }
     },
     "audit_findings": {

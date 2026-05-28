@@ -286,7 +286,9 @@ export interface TrustAssessmentV2 {
     | "high_risk"
     | "cryptographic_failure"
     | "revoked_or_compromised"
-    | "settlement_missing";
+    | "settlement_missing"
+    | "unsettled_or_unproven"
+    | "delegation_missing";
   reason_codes: string[];
   risk_codes: string[];
   feature_vector_commitment?: Hex32;
@@ -316,16 +318,42 @@ export interface MetadataFingerprintCommitmentV1 {
 
 export type MetadataFingerprintCommitmentUnsignedV1 = Omit<MetadataFingerprintCommitmentV1, "signature">;
 
+export interface DisclosureConsentV1 {
+  type: "tsl.disclosure_consent.v1";
+  subject: TrustID;
+  verifier_or_provider: TrustID;
+  allowed_field_classes: string[];
+  forbidden_field_classes: string[];
+  purpose: string;
+  issued_at: RFC3339;
+  expires_at: RFC3339;
+  revocation_pointer: string;
+  signature: HexSig;
+}
+
 export interface GraphProfileV2 {
   type: "tsl.graph_profile.v2";
   profile_id: string;
   edge_weight_profile: string;
   temporal_decay_profile: string;
   community_detection: {
-    algorithm: "leiden" | "louvain" | "connected_components" | "none";
+    algorithm:
+      | "connected_components"
+      | "connected_components_v0"
+      | "louvain_modularity_v0"
+      | "leiden_refinement_v0"
+      | "louvain_modularity_v1"
+      | "leiden_refinement_v1"
+      | "none";
     resolution_bps: number;
     min_cluster_size: number;
     edge_weight_floor_bps?: number;
+    deterministic_ordering?: "node_id_lexicographic";
+    max_passes?: number;
+    approximation_tolerance_bps?: number;
+    refinement_threshold_bps?: number;
+    projection?: "undirected_sum" | "directed_outbound";
+    negative_edge_treatment?: "ignore" | "cap" | "signed";
   };
   seed_sets: {
     trusted_seed_commitment: Hex32;
@@ -342,6 +370,13 @@ export interface GraphProfileV2 {
     allows_pairwise_private_features: boolean;
   };
   edge_weights?: Record<string, number>;
+  half_life_days?: Record<string, number>;
+  issuer_quality_bps?: Record<string, number>;
+  pagerank?: {
+    iterations: number;
+    damping_bps: number;
+    personalization?: "trusted_seeds" | "subject" | "uniform";
+  };
 }
 
 export interface GraphFeatureVectorV1 {
@@ -356,6 +391,18 @@ export interface GraphFeatureVectorV1 {
   effective_counterparty_count_milli: number;
   seed_escape_bps: number;
   adversarial_proximity_bps: number;
+  community_algorithm_id?: string;
+  community_escape_bps?: number;
+  community_diversity_bps?: number;
+  conductance_bps?: number;
+  trusted_neighbor_mass_bps?: number;
+  trusted_seed_distance_bps?: number;
+  adversarial_seed_distance_bps?: number;
+  pagerank_bps?: number;
+  ppr_lite_bps?: number;
+  modularity_bps?: number;
+  community_pass_count?: number;
+  recomputation_commitment?: Hex32;
   privacy_disclosure_level: "aggregate_only" | "pairwise" | "local_only" | "public";
   signature: HexSig;
 }
@@ -365,6 +412,11 @@ export type GraphFeatureVectorUnsignedV1 = Omit<GraphFeatureVectorV1, "signature
 export interface SybilAssessmentV1 {
   type: "tsl.sybil_assessment.v1";
   subject: TrustID;
+  issuer: TrustID;
+  sybil_profile_id: string;
+  graph_profile_id: string;
+  seed_set_commitment: Hex32;
+  evidence_commitment: Hex32;
   cluster_id_commitment: Hex32;
   computed_at: RFC3339;
   adversary_tier_assumed: "B0" | "B1" | "B2" | "B3" | "B4" | "B5";
@@ -375,7 +427,19 @@ export interface SybilAssessmentV1 {
   creation_sync_bps?: number;
   issuer_reuse_bps?: number;
   external_diversity_bps?: number;
+  seed_contamination_bps?: number;
+  receipt_symmetry_bps?: number;
   attack_cost_minor_units: number;
+  cost_components: {
+    identity_cost_minor_units: number;
+    time_aging_cost_minor_units: number;
+    external_receipt_cost_minor_units: number;
+    attestation_cost_minor_units: number;
+    compromise_cost_minor_units: number;
+    evasion_cost_minor_units: number;
+  };
+  expected_benefit_minor_units: number;
+  attack_scenario: string;
   risk_score_bps: number;
   risk_label: "low" | "medium" | "elevated" | "high" | "insufficient_evidence";
   privacy_level: "cluster_commitment_only" | "aggregate_only" | "local_only";
@@ -387,13 +451,22 @@ export type SybilAssessmentUnsignedV1 = Omit<SybilAssessmentV1, "signature">;
 export interface DriftReportV1 {
   type: "tsl.drift_report.v1";
   subject: TrustID;
+  drift_profile_id?: string;
   computed_at: RFC3339;
   baseline_window_days: number;
   observation_window_days: number;
+  feature_history_commitment?: Hex32;
+  baseline_profile_commitment?: Hex32;
+  covariance_profile_commitment?: Hex32;
+  last_verified_event_at?: RFC3339;
+  days_since_last_verified_event?: number;
+  sparse_mode?: "none" | "insufficient_baseline" | "cohort_baseline";
+  recomputation_status?: "not_supplied" | "recomputed_match" | "recomputed_mismatch" | "provider_claim";
   drift_score_bps: number;
   drift_label: "stable" | "minor" | "moderate" | "severe" | "dormant_reactivation" | "insufficient_baseline";
   action: "none" | "lower_confidence" | "step_up" | "human_review" | "temporary_block";
   reason_codes: string[];
+  component_scores_bps?: Partial<Record<"key" | "graph" | "action" | "cadence" | "claim" | "agent" | "local", number>>;
   signature: HexSig;
 }
 
@@ -474,6 +547,10 @@ export interface ZkThresholdProofV1 {
   witness_commitment: Hex32;
   public_input_hash: Hex32;
   proof: Hex32;
+  circuit_id?: string;
+  verification_key_id?: string;
+  public_signal_commitment?: Hex32;
+  release_manifest_hash?: Hex32;
   groth16?: {
     protocol: "groth16";
     curve: "bn128";
@@ -484,16 +561,109 @@ export interface ZkThresholdProofV1 {
   issued_at: RFC3339;
 }
 
+export interface ZkCircuitReleaseManifestV1 {
+  type: "tsl.zk.circuit_release_manifest.v1";
+  circuit_id: string;
+  claim: ZkThresholdProofV1["claim"];
+  version: string;
+  circuit_hash: Hex32;
+  r1cs_hash: Hex32;
+  wasm_hash: Hex32;
+  zkey_hash: Hex32;
+  verification_key_id: string;
+  verification_key_hash: Hex32;
+  verification_key?: unknown;
+  ceremony_transcript_hash: Hex32;
+  auditor: TrustID;
+  reviewer: TrustID;
+  status: "dev" | "candidate" | "active" | "revoked";
+  issued_at: RFC3339;
+  signature?: HexSig;
+}
+
+export interface ZkVerificationKeyRegistryV1 {
+  type: "tsl.zk.verification_key_registry.v1";
+  registry_id: string;
+  active_manifest_hashes: Hex32[];
+  revoked_manifest_hashes: Hex32[];
+  issued_at: RFC3339;
+  signature?: HexSig;
+}
+
 export interface SetNonMembershipProofV1 {
   type: "tsl.zk.non_membership_proof.v1";
   claim: "revocation_set_non_membership";
   subject: TrustID;
   set_root: Hex32;
   value_commitment: Hex32;
+  tree_id?: string;
+  tree_depth?: number;
+  leaf_index_commitment?: Hex32;
+  leaf_value_commitment?: Hex32;
+  empty_leaf_commitment?: Hex32;
+  root?: Hex32;
+  root_checkpoint?: Hex32;
   lower_neighbor?: Hex32;
   upper_neighbor?: Hex32;
+  leaf_index?: number;
+  sibling_path?: Array<{ side: "left" | "right"; hash: Hex32 }>;
   proof: Hex32;
   issued_at: RFC3339;
+}
+
+export interface FeatureRegistryV1 {
+  type: "tsl.feature_registry.v1";
+  registry_id: string;
+  feature_ids: string[];
+  issued_at: RFC3339;
+  signature?: HexSig;
+}
+
+export interface NormalizationProfileV1 {
+  type: "tsl.normalization_profile.v1";
+  profile_id: string;
+  feature_ranges_bps: Record<string, { min_bps: number; max_bps: number; missing_bps: number }>;
+  issued_at: RFC3339;
+  signature?: HexSig;
+}
+
+export interface WeightProfileV1 {
+  type: "tsl.weight_profile.v1";
+  profile_id: string;
+  weights_bps: Record<string, number>;
+  issued_at: RFC3339;
+  signature?: HexSig;
+}
+
+export interface CalibrationProfileV1 {
+  type: "tsl.calibration_profile.v1";
+  profile_id: string;
+  points: Array<{ raw_bps: number; calibrated_bps: number }>;
+  issued_at: RFC3339;
+  signature?: HexSig;
+}
+
+export interface ConfidenceProfileV1 {
+  type: "tsl.confidence_profile.v1";
+  profile_id: string;
+  min_width_bps: number;
+  max_width_bps: number;
+  coverage_weight_bps: number;
+  issued_at: RFC3339;
+  signature?: HexSig;
+}
+
+export interface ProviderGovernanceStatusV1 {
+  type: "tsl.provider_governance_status.v1";
+  provider: TrustID;
+  status: "sandbox" | "active" | "probation" | "research_only" | "revoked";
+  model_registered: boolean;
+  evaluation_report_commitment: Hex32;
+  red_team_result: "pass" | "fail" | "not_run";
+  privacy_leakage_bps: number;
+  promotion_gate_result: "pass" | "fail" | "conditional" | "research_only";
+  issued_at: RFC3339;
+  signature?: HexSig;
 }
 
 export interface AgentDelegationUnsignedV1 {
@@ -572,12 +742,20 @@ export interface ProofBundleV1 {
   scoring_profile?: ScoringProfileV2;
   domain_policy?: DomainPolicyV1;
   evidence_coverage?: EvidenceCoverageV1;
+  feature_registry?: FeatureRegistryV1;
+  normalization_profile?: NormalizationProfileV1;
+  weight_profile?: WeightProfileV1;
+  calibration_profile?: CalibrationProfileV1;
+  confidence_profile?: ConfidenceProfileV1;
+  provider_governance_status?: ProviderGovernanceStatusV1;
   metadata_fingerprints?: MetadataFingerprintCommitmentV1[];
   graph_profile?: GraphProfileV2;
   graph_feature_vector?: GraphFeatureVectorV1;
   sybil_assessment?: SybilAssessmentV1;
   drift_report?: DriftReportV1;
   zk_proofs?: ZkThresholdProofV1[];
+  zk_circuit_manifests?: ZkCircuitReleaseManifestV1[];
+  zk_verification_key_registry?: ZkVerificationKeyRegistryV1;
   delegations?: AgentDelegationV1[];
   delegation_policies?: DelegationPolicyV2[];
   agent_actions?: AgentActionV2[];
@@ -593,6 +771,7 @@ export interface ProofBundleV1 {
   appeal_metadata?: Record<string, unknown>;
   local_disclosure_warnings?: string[];
   message_disclosure?: MessageDisclosure;
+  disclosure_consents?: DisclosureConsentV1[];
 }
 
 export interface MessageDisclosure {
@@ -617,9 +796,22 @@ export interface VerifierPolicy {
   require_v2_assessment?: boolean;
   require_metadata_fingerprint_policy?: boolean;
   require_graph_artifacts?: boolean;
+  require_registered_zk_circuit?: boolean;
+  require_sparse_merkle_revocation_root?: boolean;
+  require_research_graph_algorithm?: boolean;
+  require_provider_governance_active?: boolean;
+  production_scoring_required?: boolean;
+  require_sybil_provider_issuer?: boolean;
+  require_seed_governance_opening?: boolean;
+  require_full_covariance_drift?: boolean;
+  require_manifest_verification_key_hash?: boolean;
+  reject_dev_zk_circuits?: boolean;
   accepted_auditors?: TrustID[];
   accepted_governance_policy?: string;
   accepted_scoring_providers?: TrustID[];
+  verifier_or_provider?: TrustID;
+  disclosure_purpose?: string;
+  revoked_disclosure_pointers?: string[];
   max_assessment_age_ms?: number;
 }
 
@@ -646,12 +838,19 @@ export interface VerificationChecks {
   audit_consistency_valid?: boolean;
   consistency_proof_valid?: boolean;
   non_membership_proof_valid?: boolean;
+  zk_circuit_registered?: boolean;
+  research_graph_algorithm_valid?: boolean;
+  provider_governance_valid?: boolean;
+  seed_governance_valid?: boolean;
+  full_covariance_drift_valid?: boolean;
   governance_policy_valid?: boolean;
   trust_assessment_v2_valid?: boolean;
   scoring_profile_valid?: boolean;
   domain_policy_valid?: boolean;
   evidence_coverage_valid?: boolean;
   metadata_fingerprint_valid?: boolean;
+  disclosure_consent_valid?: boolean;
+  checkpoint_signature_valid?: boolean;
   graph_artifacts_valid?: boolean;
   sybil_assessment_valid?: boolean;
   drift_report_valid?: boolean;
@@ -684,12 +883,20 @@ export interface VerifyTSLInput {
   scoring_profile?: ScoringProfileV2;
   domain_policy?: DomainPolicyV1;
   evidence_coverage?: EvidenceCoverageV1;
+  feature_registry?: FeatureRegistryV1;
+  normalization_profile?: NormalizationProfileV1;
+  weight_profile?: WeightProfileV1;
+  calibration_profile?: CalibrationProfileV1;
+  confidence_profile?: ConfidenceProfileV1;
+  provider_governance_status?: ProviderGovernanceStatusV1;
   metadata_fingerprints?: MetadataFingerprintCommitmentV1[];
   graph_profile?: GraphProfileV2;
   graph_feature_vector?: GraphFeatureVectorV1;
   sybil_assessment?: SybilAssessmentV1;
   drift_report?: DriftReportV1;
   zk_proofs?: ZkThresholdProofV1[];
+  zk_circuit_manifests?: ZkCircuitReleaseManifestV1[];
+  zk_verification_key_registry?: ZkVerificationKeyRegistryV1;
   delegations?: AgentDelegationV1[];
   delegation_policies?: DelegationPolicyV2[];
   agent_actions?: AgentActionV2[];
@@ -698,6 +905,7 @@ export interface VerifyTSLInput {
   non_membership_proofs?: SetNonMembershipProofV1[];
   governance_policy?: GovernancePolicyV1;
   message_disclosure?: MessageDisclosure;
+  disclosure_consents?: DisclosureConsentV1[];
 }
 
 export interface TrustResolver {

@@ -1,0 +1,12 @@
+{
+  "type": "tsl.disclosure_consent.v1",
+  "subject": "did:tsl:test:alice",
+  "allowed_field_classes": [
+    "raw_content"
+  ],
+  "forbidden_field_classes": [],
+  "purpose": "proof_link_content_opening",
+  "issued_at": "2026-05-27T12:00:00Z",
+  "expires_at": "2026-06-27T12:00:00Z",
+  "revocation_pointer": "did:tsl:test:alice#disclosure-revocations"
+}

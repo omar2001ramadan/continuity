@@ -36,6 +36,8 @@ export const DOMAIN_TAGS = {
   ASSESSMENT_V1: "tsl.trust_assessment.v1",
   ASSESSMENT_V2: "tsl.trust_assessment.v2",
   PROOF_BUNDLE_V1: "tsl.proof_bundle.v1",
+  COMMITMENT_V1: "tsl.commitment.v1",
+  COMMITMENT_LEGACY_V1: "tsl.commitment.legacy.v1",
   DELEGATION_V2: "tsl.delegation_policy.v2",
   AGENT_ACTION_V2: "tsl.agent_action.v2",
   AGENT_DELEGATION_V1: "tsl.agent_delegation.v1",
@@ -249,7 +251,15 @@ export function verifyGovernancePolicy(policy: GovernancePolicyV1, publicKeyHex:
 }
 
 export function commitmentHashFromParts(eventHashHex: Hex32, signatureHex: HexSig): Hex32 {
+  return hashDomain(DOMAIN_TAGS.COMMITMENT_V1, concatBytes(hexToBytes(eventHashHex), hexToBytes(signatureHex)));
+}
+
+export function legacyCommitmentHashFromParts(eventHashHex: Hex32, signatureHex: HexSig): Hex32 {
   return sha256Hex(concatBytes(hexToBytes(eventHashHex), hexToBytes(signatureHex)));
+}
+
+export function legacyCommitmentHash(event: EventCommitmentV1): Hex32 {
+  return legacyCommitmentHashFromParts(eventHash(event), event.signature);
 }
 
 export function commitmentHash(event: EventCommitmentV1): Hex32 {

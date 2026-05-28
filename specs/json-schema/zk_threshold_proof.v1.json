@@ -29,6 +29,10 @@
     "witness_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
     "public_input_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
     "proof": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "circuit_id": { "type": "string" },
+    "verification_key_id": { "type": "string" },
+    "public_signal_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "release_manifest_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
     "groth16": {
       "type": "object",
       "required": ["protocol", "curve", "proof", "public_signals"],

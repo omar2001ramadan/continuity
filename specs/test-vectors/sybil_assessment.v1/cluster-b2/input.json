@@ -1,6 +1,11 @@
 {
   "type": "tsl.sybil_assessment.v1",
   "subject": "did:tsl:test:alice",
+  "issuer": "did:tsl:provider:reference-sybil",
+  "sybil_profile_id": "sybil-reference-v0",
+  "graph_profile_id": "graph-default-rc4",
+  "seed_set_commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "evidence_commitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "cluster_id_commitment": "0x7777777777777777777777777777777777777777777777777777777777777777",
   "computed_at": "2026-05-25T00:00:00Z",
   "adversary_tier_assumed": "B2",
@@ -12,6 +17,16 @@
   "issuer_reuse_bps": 300,
   "external_diversity_bps": 6900,
   "attack_cost_minor_units": 125000,
+  "cost_components": {
+    "identity_cost_minor_units": 50000,
+    "time_aging_cost_minor_units": 25000,
+    "external_receipt_cost_minor_units": 15000,
+    "attestation_cost_minor_units": 10000,
+    "compromise_cost_minor_units": 15000,
+    "evasion_cost_minor_units": 10000
+  },
+  "expected_benefit_minor_units": 100000,
+  "attack_scenario": "slow_aged_farm",
   "risk_score_bps": 8933,
   "risk_label": "high",
   "privacy_level": "cluster_commitment_only",
