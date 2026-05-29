@@ -8,11 +8,14 @@ import {
   referenceScoreBps,
   scoreInputFromFeatureVector,
   labelForScore,
-	  computeEvidenceCoverageV0,
-	  computeReferenceScoreV0,
-  sha256Hex,
+		  computeEvidenceCoverageV0,
+		  computeReferenceScoreV0,
+		  extractReferenceFeatureVectorV0,
+	  sha256Hex,
+  scoringProfileV2Hash,
 	  signTrustAssessmentV2,
 	  signTrustAssessmentObject,
+  verifyEd25519,
   verifyTSL,
   validateSchema,
   type VerifiedAttestationSummary,
@@ -29,9 +32,26 @@ function objectHash(object: unknown): string {
   return sha256Hex(canonicalBytes(object));
 }
 
+function unsignedObjectHash(object: unknown): string {
+  if (!object || typeof object !== "object") return objectHash(object);
+  const unsigned = { ...(object as Record<string, unknown>) };
+  delete unsigned.signature;
+  return objectHash(unsigned);
+}
+
 function schemaValidOrErrors(schemaKey: Parameters<typeof validateSchema>[0], object: unknown): string[] {
   const validation = validateSchema(schemaKey, object);
   return validation.valid ? [] : validation.errors;
+}
+
+function signedByIdentity(input: {
+  identity: IdentityDocumentV1 | undefined;
+  issuedAt: string;
+  hash: string;
+  signature?: string;
+}): boolean {
+  const key = input.identity?.verification_methods.find((method) => method.type === "ed25519" && method.status === "active" && Date.parse(method.created_at) <= Date.parse(input.issuedAt));
+  return Boolean(key && input.signature && verifyEd25519(key.public_key, input.hash as `0x${string}`, input.signature as `0x${string}`));
 }
 
 function normalizeFeaturesFromProfiles(input: {
@@ -70,6 +90,8 @@ export function createScoringProvider() {
   const scoringProfileStore = new Map<string, unknown>();
   const modelCardStore = new Map<string, unknown>();
   const evaluationReportStore = new Map<string, unknown>();
+  const graphArtifactStore = new Map<string, unknown>();
+  const metadataFingerprintStore = new Map<string, unknown>();
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.get("/health", (_req, res) => res.json({ ok: true, service: "tsl-scoring-provider" }));
@@ -163,7 +185,7 @@ export function createScoringProvider() {
     }
   });
 
-  app.post("/v1/scoring/evaluation-reports", async (req, res) => {
+	  app.post("/v1/scoring/evaluation-reports", async (req, res) => {
     try {
       const evaluation_report = req.body.evaluation_report ?? req.body;
       const validation = validateSchema("evaluationReportV1", evaluation_report);
@@ -185,9 +207,47 @@ export function createScoringProvider() {
     } catch (error) {
       res.status(400).json({ error: { code: "TSL_EVALUATION_REPORT_FAILED", message: error instanceof Error ? error.message : String(error) } });
     }
+	  });
+
+  app.post("/v1/graph/features", async (req, res) => {
+    const graphProfile = req.body.graph_profile;
+    const graphFeatureVector = req.body.graph_feature_vector;
+    const sybilAssessment = req.body.sybil_assessment;
+    const driftReport = req.body.drift_report;
+    const errors = [
+      ...(graphProfile ? schemaValidOrErrors("graphProfileV2", graphProfile) : []),
+      ...(graphFeatureVector ? schemaValidOrErrors("graphFeatureVectorV1", graphFeatureVector) : []),
+      ...(sybilAssessment ? schemaValidOrErrors("sybilAssessmentV1", sybilAssessment) : []),
+      ...(driftReport ? schemaValidOrErrors("driftReportV1", driftReport) : [])
+    ];
+    if (errors.length || (!graphFeatureVector && !sybilAssessment && !driftReport)) {
+      res.status(422).json({ error: { code: "TSL_GRAPH_ARTIFACTS_INVALID", message: errors.join("; ") || "At least one graph, Sybil, or drift artifact is required" } });
+      return;
+    }
+    const artifactId = String(
+      graphFeatureVector?.feature_commitment ??
+        graphFeatureVector?.recomputation_commitment ??
+        sybilAssessment?.evidence_commitment ??
+        driftReport?.feature_history_commitment ??
+        objectHash(req.body)
+    );
+    graphArtifactStore.set(artifactId, req.body);
+    res.json({ status: "accepted", artifact_id: artifactId });
   });
 
-	  app.post("/v1/assessments/v2", async (req, res) => {
+  app.post("/v1/metadata-fingerprints", (req, res) => {
+    const fingerprint = req.body.metadata_fingerprint ?? req.body;
+    const validation = validateSchema("metadataFingerprintCommitmentV1", fingerprint);
+    if (!validation.valid) {
+      res.status(422).json({ error: { code: "TSL_METADATA_FINGERPRINT_INVALID", message: validation.errors.join("; ") } });
+      return;
+    }
+    const commitment = String(fingerprint.fingerprint_commitment ?? objectHash(fingerprint));
+    metadataFingerprintStore.set(commitment, fingerprint);
+    res.json({ status: "accepted", fingerprint_commitment: commitment });
+  });
+
+		  app.post("/v1/assessments/v2", async (req, res) => {
 	    try {
 	      if (!process.env.TSL_SCORING_PROVIDER_SEED_HEX) {
 	        res.status(400).json({ error: { code: "TSL_PROVIDER_KEY_MISSING", message: "TSL_SCORING_PROVIDER_SEED_HEX is required" } });
@@ -201,9 +261,11 @@ export function createScoringProvider() {
       const bundle = req.body.proof_bundle ?? req.body.bundle;
       const verifyInput: VerifyTSLInput | null = bundle
         ? {
+            proof_bundle: bundle,
             envelope: bundle.envelope,
             proof: bundle.proof,
             checkpoint: bundle.checkpoint,
+            redaction_manifest: bundle.redaction_manifest,
             receipts: bundle.receipts,
             attestations: bundle.attestations,
             revocations: bundle.revocations,
@@ -218,6 +280,7 @@ export function createScoringProvider() {
               envelope: req.body.envelope,
               proof: req.body.proof,
               checkpoint: req.body.checkpoint,
+              redaction_manifest: req.body.redaction_manifest,
               receipts: req.body.receipts,
               attestations: req.body.attestations,
               revocations: req.body.revocations,
@@ -262,12 +325,23 @@ export function createScoringProvider() {
             high_risk_bps: 1500
           }
         };
-      const verification = await verifyTSL(verifyInput, resolver, {
-        require_inclusion: true,
-        require_checkpoint: true,
-        require_settlement: domainPolicy.requires_settlement
-      });
-      const subject = String(req.body.subject ?? verifyInput.envelope.sender);
+	      const verification = await verifyTSL(verifyInput, resolver, {
+	        require_inclusion: true,
+	        require_checkpoint: true,
+	        require_settlement: domainPolicy.requires_settlement
+	      });
+	      if (!verification.verified) {
+	        res.status(422).json({
+	          error: {
+	            code: "TSL_SCORING_EVIDENCE_VERIFICATION_FAILED",
+	            message: "v2 scoring requires verified evidence before private receipts, disclosures, or counterparties can be used for feature extraction",
+	            verification_errors: verification.errors,
+	            checks: verification.checks
+	          }
+	        });
+	        return;
+	      }
+	      const subject = String(req.body.subject ?? verifyInput.envelope.sender);
       const issuer = String(req.body.issuer ?? process.env.TSL_SCORING_PROVIDER_ID ?? "did:tsl:provider:local");
       const callerFeatureOverride =
         req.body.evidence_coverage !== undefined || req.body.normalized_features_bps !== undefined || req.body.weights_bps !== undefined;
@@ -298,6 +372,7 @@ export function createScoringProvider() {
           ...schemaValidOrErrors("calibrationProfileV1", calibrationProfile),
           ...schemaValidOrErrors("confidenceProfileV1", confidenceProfile)
         ];
+        const providerIdentity = identityMap.get(issuer);
         const profileCommitmentsValid =
           scoringProfile &&
           featureRegistry &&
@@ -309,7 +384,18 @@ export function createScoringProvider() {
           scoringProfile.feature_registry_commitment === objectHash(featureRegistry) &&
           scoringProfile.normalization_profile_commitment === objectHash(normalizationProfile) &&
           scoringProfile.weight_profile_commitment === objectHash(weightProfile) &&
-          scoringProfile.calibration_profile_commitment === objectHash(calibrationProfile);
+          scoringProfile.calibration_profile_commitment === objectHash(calibrationProfile) &&
+          scoringProfile.threshold_policy_commitment === objectHash(domainPolicy) &&
+          scoringProfile.evaluation_report_commitment === objectHash(req.body.evaluation_report) &&
+          Boolean(req.body.privacy_report_commitment ?? req.body.privacy_report) &&
+          Boolean(req.body.training_data_commitment) &&
+          Boolean(scoringProfile.appeal_policy_uri ?? req.body.appeal_policy_uri);
+        const profileSignaturesValid =
+          scoringProfile &&
+          signedByIdentity({ identity: providerIdentity, issuedAt: scoringProfile.issued_at, hash: scoringProfileV2Hash(scoringProfile), signature: scoringProfile.signature }) &&
+          [featureRegistry, normalizationProfile, weightProfile, calibrationProfile, confidenceProfile].every((artifact) =>
+            signedByIdentity({ identity: providerIdentity, issuedAt: artifact.issued_at, hash: unsignedObjectHash(artifact), signature: artifact.signature })
+          );
         if (
           !governance ||
           !governanceValidation.valid ||
@@ -328,11 +414,11 @@ export function createScoringProvider() {
           });
           return;
         }
-        if (profileErrors.length || !profileCommitmentsValid) {
+        if (profileErrors.length || !profileCommitmentsValid || !profileSignaturesValid) {
           res.status(400).json({
             error: {
               code: "TSL_PROFILE_DERIVED_SCORING_REQUIRED",
-              message: `Production scoring requires profile sub-artifacts whose commitments match scoring_profile.v2${profileErrors.length ? `: ${profileErrors.join("; ")}` : ""}`
+              message: `Production scoring requires signed profile sub-artifacts and commitments matching scoring_profile.v2${profileErrors.length ? `: ${profileErrors.join("; ")}` : ""}`
             }
           });
           return;
@@ -352,21 +438,23 @@ export function createScoringProvider() {
           recent_revocation_count: Number(req.body.recent_revocation_count ?? 0),
           computed_at: now.toISOString()
         });
-      const rawFeatureValues = {
-        crypto_validity: verification.checks.signature_valid && verification.checks.key_active && verification.checks.not_revoked ? 10000 : 0,
-        evidence_coverage: evidenceCoverage.coverage_bps,
-        reciprocity: Number(req.body.graph_feature_vector?.reciprocity_bps ?? 0),
-        receipt_quality: Math.min(10000, evidenceCoverage.valid_receipt_count * 1000),
-        attestation_quality: Math.min(10000, evidenceCoverage.attestation_count * 2000),
-        temporal_consistency: Number(
-          req.body.drift_report?.drift_label === "stable"
-            ? 10000
-            : req.body.drift_report
-              ? Math.max(0, 10000 - Number(req.body.drift_report.drift_score_bps ?? 0))
-              : 5000
-        ),
-        sybil_resistance: req.body.sybil_assessment ? Math.max(0, 10000 - Number(req.body.sybil_assessment.risk_score_bps ?? 0)) : undefined
-      };
+	      const rawFeatureValues = {
+	        ...extractReferenceFeatureVectorV0({
+	          subject,
+	          identity: identityMap.get(subject),
+	          envelope: verifyInput.envelope,
+	          receipts: verifyInput.receipts,
+	          attestations: verifyInput.attestations,
+	          attestations_v2: verifyInput.attestations_v2,
+	          graph_feature_vector: req.body.graph_feature_vector,
+	          sybil_assessment: req.body.sybil_assessment,
+	          drift_report: req.body.drift_report,
+	          verification_checks: verification.checks,
+	          local_relationship_bps: req.body.local_relationship_bps !== undefined ? Number(req.body.local_relationship_bps) : undefined,
+	          computed_at: now.toISOString()
+	        }),
+	        evidence_coverage: evidenceCoverage.coverage_bps
+	      };
       const derivedProfileFeatures =
         !allowCallerFeatures
           ? normalizeFeaturesFromProfiles({

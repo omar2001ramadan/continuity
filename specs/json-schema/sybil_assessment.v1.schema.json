@@ -133,7 +133,9 @@
         "external_receipt_cost_minor_units": { "type": "integer", "minimum": 0 },
         "attestation_cost_minor_units": { "type": "integer", "minimum": 0 },
         "compromise_cost_minor_units": { "type": "integer", "minimum": 0 },
-        "evasion_cost_minor_units": { "type": "integer", "minimum": 0 }
+        "evasion_cost_minor_units": { "type": "integer", "minimum": 0 },
+        "issuer_collusion_cost_minor_units": { "type": "integer", "minimum": 0 },
+        "infrastructure_consistency_cost_minor_units": { "type": "integer", "minimum": 0 }
       }
     },
     "expected_benefit_minor_units": {
@@ -142,6 +144,38 @@
     },
     "attack_scenario": {
       "type": "string"
+    },
+    "compromise_signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key_revocation_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "severe_drift_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "recovery_anomaly_bps": { "type": "integer", "minimum": 0, "maximum": 10000 }
+      }
+    },
+    "issuer_collusion_signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "issuer_reversal_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "issuer_reuse_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "low_quality_issuer_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "collusion_indicator_bps": { "type": "integer", "minimum": 0, "maximum": 10000 }
+      }
+    },
+    "infrastructure_collusion_signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "checkpoint_conflict_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "provider_auditor_disagreement_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "settlement_anomaly_bps": { "type": "integer", "minimum": 0, "maximum": 10000 }
+      }
+    },
+    "scenario_evidence_checks": {
+      "type": "array",
+      "items": { "type": "string" }
     },
     "risk_score_bps": {
       "type": "integer",

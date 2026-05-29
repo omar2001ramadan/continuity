@@ -1,10 +1,10 @@
 import { canonicalize, withoutField } from "./canonicalize";
 import { buildIdentityFromSeed } from "./commitments";
-import { DOMAIN_TAGS, ZERO_HASH, commitmentHash, hashDomain, sha256Hex, signEd25519 } from "./crypto";
+import { DOMAIN_TAGS, ZERO_HASH, attestationHash, commitmentHash, hashDomain, receiptHash, revocationHash, sha256Hex, signEd25519 } from "./crypto";
 import { MemoryTrustResolver } from "./identity";
 import { buildInclusionProof, buildMerkleTree } from "./merkle";
 import type { SettlementBackend } from "./settlement";
-import type { BatchCheckpointV1, EventCommitmentV1, Hex32, HexSig, IdentityDocumentV1, InclusionProofV1, TrustID } from "./types";
+import type { AttestationV1, BatchCheckpointV1, EventCommitmentV1, Hex32, HexSig, IdentityDocumentV1, InclusionProofV1, ReceiptCommitmentV1, RevocationV1, TrustID } from "./types";
 import { validateSchema } from "./validation";
 import { verifyTSL } from "./verifier";
 
@@ -12,6 +12,15 @@ export interface AcceptedEvent {
   event: EventCommitmentV1;
   commitment_hash: Hex32;
   relay_id: TrustID;
+  shard: string;
+  epoch_start_ms: number;
+  epoch_duration_ms: number;
+  log_index: number;
+  accepted_at: string;
+}
+
+export interface AcceptedLogObject {
+  commitment_hash: Hex32;
   shard: string;
   epoch_start_ms: number;
   epoch_duration_ms: number;
@@ -47,6 +56,9 @@ export class InMemoryRelayStore {
   readonly settlement_backend: SettlementBackend | null;
   private readonly relay_signing_seed_hex?: string;
   private readonly events = new Map<Hex32, AcceptedEvent>();
+  private readonly receipts = new Map<Hex32, AcceptedLogObject>();
+  private readonly attestations = new Map<Hex32, AcceptedLogObject>();
+  private readonly revocations = new Map<Hex32, AcceptedLogObject>();
   private readonly nonces = new Set<string>();
   private readonly settledCheckpoints = new Map<string, BatchCheckpointV1>();
   private readonly closedSegments = new Map<string, Hex32[]>();
@@ -124,6 +136,48 @@ export class InMemoryRelayStore {
     return accepted;
   }
 
+  acceptReceipt(receipt: ReceiptCommitmentV1): AcceptedLogObject {
+    const commitment = receiptHash(receipt);
+    const epochStart = Math.floor(Date.parse(receipt.timestamp) / this.epoch_duration_ms) * this.epoch_duration_ms;
+    const shard = shardForTrustID(receipt.receiver);
+    const accepted = this.acceptLogObject(this.receipts, commitment, epochStart, shard);
+    this.receipts.set(commitment, accepted);
+    return accepted;
+  }
+
+  acceptAttestation(attestation: AttestationV1): AcceptedLogObject {
+    const commitment = attestationHash(attestation);
+    const epochStart = Math.floor(Date.parse(attestation.issued_at) / this.epoch_duration_ms) * this.epoch_duration_ms;
+    const shard = shardForTrustID(attestation.issuer);
+    const accepted = this.acceptLogObject(this.attestations, commitment, epochStart, shard);
+    this.attestations.set(commitment, accepted);
+    return accepted;
+  }
+
+  acceptRevocation(revocation: RevocationV1): AcceptedLogObject {
+    const commitment = revocationHash(revocation);
+    const epochStart = Math.floor(Date.parse(revocation.effective_at) / this.epoch_duration_ms) * this.epoch_duration_ms;
+    const shard = shardForTrustID(revocation.trust_id);
+    const accepted = this.acceptLogObject(this.revocations, commitment, epochStart, shard);
+    this.revocations.set(commitment, accepted);
+    return accepted;
+  }
+
+  private acceptLogObject(store: Map<Hex32, AcceptedLogObject>, commitment: Hex32, epochStart: number, shard: string): AcceptedLogObject {
+    const segmentKey = checkpointStoreKey(epochStart, shard);
+    if (this.closedSegments.has(segmentKey)) {
+      throw new RelayValidationError("TSL_LOG_SEGMENT_CLOSED", "Cannot append to a checkpointed epoch/shard segment");
+    }
+    return {
+      commitment_hash: commitment,
+      shard,
+      epoch_start_ms: epochStart,
+      epoch_duration_ms: this.epoch_duration_ms,
+      log_index: this.objectsFor(store, epochStart, shard).length,
+      accepted_at: new Date().toISOString()
+    };
+  }
+
   getAcceptedEvent(commitment: Hex32): AcceptedEvent | null {
     return this.events.get(commitment) ?? null;
   }
@@ -153,22 +207,29 @@ export class InMemoryRelayStore {
     if (settled) return structuredClone(settled);
 
     const commitments = this.eventsFor(epoch_start_ms, shard).map((item) => item.commitment_hash);
+    const receiptCommitments = this.objectsFor(this.receipts, epoch_start_ms, shard).map((item) => item.commitment_hash);
+    const attestationCommitments = this.objectsFor(this.attestations, epoch_start_ms, shard).map((item) => item.commitment_hash);
+    const revocationCommitments = this.objectsFor(this.revocations, epoch_start_ms, shard).map((item) => item.commitment_hash);
     const eventTree = buildMerkleTree(commitments);
+    const receiptTree = buildMerkleTree(receiptCommitments);
+    const attestationTree = buildMerkleTree(attestationCommitments);
+    const revocationTree = buildMerkleTree(revocationCommitments);
     const checkpoint: BatchCheckpointV1 = {
       type: "tsl.batch_checkpoint.v1",
       epoch_start_ms,
       epoch_duration_ms: this.epoch_duration_ms,
       shard,
       event_root: eventTree.root,
-      receipt_root: ZERO_HASH,
-      attestation_root: ZERO_HASH,
-      revocation_root: ZERO_HASH,
-      event_count: commitments.length,
-      receipt_count: 0,
-      previous_checkpoint: this.previousCheckpointHash(epoch_start_ms, shard),
-      relay_id: this.relay_id,
-      relay_signature: "0x00"
-    };
+      receipt_root: receiptTree.root,
+      attestation_root: attestationTree.root,
+      revocation_root: revocationTree.root,
+	      event_count: commitments.length,
+	      receipt_count: receiptCommitments.length,
+	      previous_checkpoint: this.previousCheckpointHash(epoch_start_ms, shard),
+	      ...(this.settlement_backend?.settlementBackendId ? { settlement_backend: this.settlement_backend.settlementBackendId } : {}),
+	      relay_id: this.relay_id,
+	      relay_signature: "0x00"
+	    };
     return this.relay_signing_seed_hex ? signCheckpointWithSeed(checkpoint, this.relay_signing_seed_hex) : {
       ...checkpoint,
       relay_signature: pseudoRelaySignature({
@@ -201,6 +262,12 @@ export class InMemoryRelayStore {
       .sort((left, right) => left.log_index - right.log_index);
   }
 
+  private objectsFor(store: Map<Hex32, AcceptedLogObject>, epoch_start_ms: number, shard: string): AcceptedLogObject[] {
+    return [...store.values()]
+      .filter((item) => item.epoch_start_ms === epoch_start_ms && item.shard === shard)
+      .sort((left, right) => left.log_index - right.log_index);
+  }
+
   identities(): IdentityDocumentV1[] {
     return this.relay_identity ? [structuredClone(this.relay_identity)] : [];
   }
@@ -222,7 +289,7 @@ export function shardForTrustID(trustId: TrustID): string {
 }
 
 export function checkpointHash(checkpoint: BatchCheckpointV1): Hex32 {
-  const payload = withoutField(checkpoint as unknown as Record<string, unknown>, "relay_signature");
+  const payload = withoutField(withoutField(checkpoint as unknown as Record<string, unknown>, "relay_signature"), "settlement_tx");
   return hashDomain(DOMAIN_TAGS.CHECKPOINT_V1, new TextEncoder().encode(canonicalize(payload)));
 }
 

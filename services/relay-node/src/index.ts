@@ -204,6 +204,7 @@ export function createRelayNode() {
         signature: receipt.signature,
         code: "TSL_RECEIPT_SIGNATURE_INVALID"
       });
+      store.acceptReceipt(receipt);
       await repo?.insertReceipt(receipt, receiptCommitment, store.relay_id, epochStartMs);
       await queue?.publish(QUEUE_TOPICS.receiptsAccepted, { receipt_hash: receiptCommitment, receipt });
       res.json({ status: "accepted", receipt_hash: receiptCommitment, relay_id: store.relay_id, epoch_start_ms: epochStartMs });
@@ -238,6 +239,7 @@ export function createRelayNode() {
       });
       const attestationCommitment = attestationCommitmentHash(attestation);
       const epochStartMs = Math.floor(Date.parse(attestation.issued_at) / store.epoch_duration_ms) * store.epoch_duration_ms;
+      store.acceptAttestation(attestation);
       await ensureDurableReady();
       await repo?.insertAttestation(attestation, store.relay_id, epochStartMs);
       await queue?.publish(QUEUE_TOPICS.attestationsAccepted, { attestation_hash: attestationCommitment, attestation });
@@ -260,6 +262,7 @@ export function createRelayNode() {
         throw new RelayValidationError("TSL_REVOCATION_SIGNATURE_INVALID", "Revocation signature failed verification");
       }
       const revocationCommitment = revocationCommitmentHash(revocation);
+      store.acceptRevocation(revocation);
       store.resolver.revokeKey(revocation.trust_id, revocation.revoked_key);
       await ensureDurableReady();
       await repo?.insertRevocation(revocation, store.relay_id, store.epoch_duration_ms);
@@ -297,6 +300,7 @@ export function createRelayNode() {
         throw new RelayValidationError("TSL_REVOCATION_SIGNATURE_INVALID", "Rotation revocation signature failed verification");
       }
       const revocationCommitment = revocationCommitmentHash(revocation);
+      store.acceptRevocation(revocation);
       store.resolver.revokeKey(revocation.trust_id, revocation.revoked_key);
       await ensureDurableReady();
       await repo?.insertRevocation(revocation, store.relay_id, store.epoch_duration_ms);
@@ -416,50 +420,52 @@ export function createRelayNode() {
         : store.resolver;
       const result = await verifyTSL(
         {
-          envelope: req.body.envelope,
-          proof: req.body.proof,
+          proof_bundle: req.body.proof_bundle,
+          envelope: req.body.envelope ?? req.body.proof_bundle?.envelope,
+          proof: req.body.proof ?? req.body.proof_bundle?.proof,
           receipt_proofs: req.body.receipt_proofs,
-          checkpoint: req.body.checkpoint,
-          message_disclosure: req.body.message_disclosure,
-          receipts: req.body.receipts,
-          attestations: req.body.attestations,
-          revocations: req.body.revocations,
-          assessment: req.body.assessment,
-          assessment_v2: req.body.assessment_v2,
-          scoring_profile: req.body.scoring_profile,
-          domain_policy: req.body.domain_policy,
-          evidence_coverage: req.body.evidence_coverage,
-          metadata_fingerprints: req.body.metadata_fingerprints,
-          graph_profile: req.body.graph_profile,
-          graph_feature_vector: req.body.graph_feature_vector,
-          trusted_seeds: req.body.trusted_seeds,
-          adversarial_seeds: req.body.adversarial_seeds,
-          trusted_seed_governance: req.body.trusted_seed_governance,
-          adversarial_seed_governance: req.body.adversarial_seed_governance,
-          event_receivers: req.body.event_receivers,
-          sybil_assessment: req.body.sybil_assessment,
-          sybil_profile: req.body.sybil_profile,
-          drift_report: req.body.drift_report,
-          drift_feature_history: req.body.drift_feature_history,
-          drift_cohort_baseline_components: req.body.drift_cohort_baseline_components,
-          zk_proofs: req.body.zk_proofs,
-          zk_circuit_manifests: req.body.zk_circuit_manifests,
-          zk_verification_key_registry: req.body.zk_verification_key_registry,
-          delegations: req.body.delegations,
-          delegation_policies: req.body.delegation_policies,
-          agent_actions: req.body.agent_actions,
-          audit_findings: req.body.audit_findings,
-          consistency_proofs: req.body.consistency_proofs,
-          non_membership_proofs: req.body.non_membership_proofs,
-          governance_policy: req.body.governance_policy,
-          disclosure_consents: req.body.disclosure_consents
+          checkpoint: req.body.checkpoint ?? req.body.proof_bundle?.checkpoint,
+          redaction_manifest: req.body.redaction_manifest ?? req.body.proof_bundle?.redaction_manifest,
+          message_disclosure: req.body.message_disclosure ?? req.body.proof_bundle?.message_disclosure,
+          receipts: req.body.receipts ?? req.body.proof_bundle?.receipts,
+          attestations: req.body.attestations ?? req.body.proof_bundle?.attestations,
+          revocations: req.body.revocations ?? req.body.proof_bundle?.revocations,
+          assessment: req.body.assessment ?? req.body.proof_bundle?.assessment,
+          assessment_v2: req.body.assessment_v2 ?? req.body.proof_bundle?.assessment_v2,
+          scoring_profile: req.body.scoring_profile ?? req.body.proof_bundle?.scoring_profile,
+          domain_policy: req.body.domain_policy ?? req.body.proof_bundle?.domain_policy,
+          evidence_coverage: req.body.evidence_coverage ?? req.body.proof_bundle?.evidence_coverage,
+          metadata_fingerprints: req.body.metadata_fingerprints ?? req.body.proof_bundle?.metadata_fingerprints,
+          graph_profile: req.body.graph_profile ?? req.body.proof_bundle?.graph_profile,
+          graph_feature_vector: req.body.graph_feature_vector ?? req.body.proof_bundle?.graph_feature_vector,
+          trusted_seeds: req.body.trusted_seeds ?? req.body.proof_bundle?.trusted_seeds,
+          adversarial_seeds: req.body.adversarial_seeds ?? req.body.proof_bundle?.adversarial_seeds,
+          trusted_seed_governance: req.body.trusted_seed_governance ?? req.body.proof_bundle?.trusted_seed_governance,
+          adversarial_seed_governance: req.body.adversarial_seed_governance ?? req.body.proof_bundle?.adversarial_seed_governance,
+          event_receivers: req.body.event_receivers ?? req.body.proof_bundle?.event_receivers,
+          sybil_assessment: req.body.sybil_assessment ?? req.body.proof_bundle?.sybil_assessment,
+          sybil_profile: req.body.sybil_profile ?? req.body.proof_bundle?.sybil_profile,
+          drift_report: req.body.drift_report ?? req.body.proof_bundle?.drift_report,
+          drift_feature_history: req.body.drift_feature_history ?? req.body.proof_bundle?.drift_feature_history,
+          drift_cohort_baseline_components: req.body.drift_cohort_baseline_components ?? req.body.proof_bundle?.drift_cohort_baseline_components,
+          zk_proofs: req.body.zk_proofs ?? req.body.proof_bundle?.zk_proofs,
+          zk_circuit_manifests: req.body.zk_circuit_manifests ?? req.body.proof_bundle?.zk_circuit_manifests,
+          zk_verification_key_registry: req.body.zk_verification_key_registry ?? req.body.proof_bundle?.zk_verification_key_registry,
+          delegations: req.body.delegations ?? req.body.proof_bundle?.delegations,
+          delegation_policies: req.body.delegation_policies ?? req.body.proof_bundle?.delegation_policies,
+          agent_actions: req.body.agent_actions ?? req.body.proof_bundle?.agent_actions,
+          audit_findings: req.body.audit_findings ?? req.body.proof_bundle?.audit_findings,
+          consistency_proofs: req.body.consistency_proofs ?? req.body.proof_bundle?.consistency_proofs,
+          non_membership_proofs: req.body.non_membership_proofs ?? req.body.proof_bundle?.non_membership_proofs,
+          governance_policy: req.body.governance_policy ?? req.body.proof_bundle?.governance_policy,
+          disclosure_consents: req.body.disclosure_consents ?? req.body.proof_bundle?.disclosure_consents
         },
         resolver,
-        req.body.policy ?? {
-          require_inclusion: Boolean(req.body.proof),
-          require_checkpoint: Boolean(req.body.checkpoint),
-          require_settlement: false
-        },
+	        req.body.policy ?? {
+	          require_inclusion: Boolean(req.body.proof ?? req.body.proof_bundle?.proof),
+	          require_checkpoint: Boolean(req.body.checkpoint ?? req.body.proof_bundle?.checkpoint),
+	          require_settlement: false
+	        },
         settlementBackend ?? undefined
       );
       res.status(result.verified ? 200 : 422).json(result);

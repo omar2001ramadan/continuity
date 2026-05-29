@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { canonicalBytes } from "../packages/core-ts/src/canonicalize";
 import { buildIdentityFromSeed, signMessageEvent } from "../packages/core-ts/src/commitments";
-import { commitmentHashFromParts, hashDomain, legacyCommitmentHashFromParts, sha256Hex, signReceipt } from "../packages/core-ts/src/crypto";
+import { commitmentHashFromParts, hashDomain, legacyCommitmentHashFromParts, sha256Hex, signEd25519, signReceipt } from "../packages/core-ts/src/crypto";
 import { buildThresholdProof, verifyThresholdProofAsync, zkCircuitReleaseManifestHash, zkProofUsesRegisteredCircuit, zkVerificationKeyObjectHash } from "../packages/core-ts/src/zk";
 import { buildSparseMerkleTree, proveSparseMerkleNonMembership, verifySparseMerkleProof } from "../packages/core-ts/src/nonMembership";
 import {
@@ -11,12 +11,14 @@ import {
   computeGraphFeatureVectorV0,
   computeMetadataFingerprintCommitmentV0,
   computeReferenceScoreV0,
-  computeSybilAssessmentV0,
-  constructGraphFromEvidenceV0,
-  constructGraphV0,
-  verifyDelegatedAgentActionV0
-} from "../packages/core-ts/src/v2";
+	  computeSybilAssessmentV0,
+	  constructGraphFromEvidenceV0,
+	  constructGraphV0,
+	  graphFeatureVectorV1Hash,
+	  verifyDelegatedAgentActionV0
+	} from "../packages/core-ts/src/v2";
 import { validateSchema, type SchemaName } from "../packages/core-ts/src/validation";
+import { verifyTSL } from "../packages/core-ts/src/verifier";
 import { checkpointHash } from "../packages/core-ts/src/relayStore";
 import { filterProofBundleDisclosures } from "../packages/core-ts/src/proofBundle";
 import errorCodeRegistry from "../specs/error-codes.v1.json";
@@ -519,10 +521,14 @@ async function checkSemanticConformance(): Promise<void> {
 	    relay_id: "did:tsl:relay:conformance",
 	    relay_signature: "0x00" as const
 	  };
-	  assert(
-	    checkpointHash({ ...checkpointBase, settlement_backend: "eip155:1", settlement_tx: "0xabc" }) !== checkpointHash(checkpointBase),
-	    "Checkpoint hash must bind settlement_backend and settlement_tx"
-	  );
+		  assert(
+		    checkpointHash({ ...checkpointBase, settlement_backend: "eip155:1" }) !== checkpointHash(checkpointBase),
+		    "Checkpoint identity hash must bind settlement_backend"
+		  );
+		  assert(
+		    checkpointHash({ ...checkpointBase, settlement_tx: "0xabc" }) === checkpointHash(checkpointBase),
+		    "Checkpoint identity hash must treat settlement_tx as post-settlement evidence"
+		  );
 
 	  const bundleIdentity = buildIdentityFromSeed({ trust_id: "did:tsl:a", key_id: "#a", seed_hex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", created_at: "2026-01-01T00:00:00Z" });
 	  const bundleEvent = signMessageEvent({ sender: bundleIdentity.id, signing_key_id: "#a", seed_hex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", message: "bundle", timestamp: "2026-05-27T12:00:00Z" });
@@ -701,10 +707,43 @@ async function checkSemanticConformance(): Promise<void> {
   });
   assert(vector.reciprocity_bps === 4000, `Graph reciprocity vector mismatch: ${vector.reciprocity_bps}`);
   assert(vector.counterparty_hhi_bps === 5200, `Graph HHI vector mismatch: ${vector.counterparty_hhi_bps}`);
-  assert(vector.adversarial_proximity_bps === 6000, `Graph adversarial proximity mismatch: ${vector.adversarial_proximity_bps}`);
-  assert(vector.community_escape_bps === 0, `Graph community escape mismatch: ${vector.community_escape_bps}`);
-  assert(vector.pagerank_bps !== undefined && vector.trusted_seed_distance_bps !== undefined, "Graph vector missing PageRank/seed-distance fields");
-  assertThrows(() => constructGraphV0({ edges: [] } as never), "Protocol graph construction must reject raw-edge inputs");
+	  assert(vector.adversarial_proximity_bps === 6000, `Graph adversarial proximity mismatch: ${vector.adversarial_proximity_bps}`);
+	  assert(vector.community_escape_bps === 0, `Graph community escape mismatch: ${vector.community_escape_bps}`);
+	  assert(vector.pagerank_bps !== undefined && vector.trusted_seed_distance_bps !== undefined, "Graph vector missing PageRank/seed-distance fields");
+	  assertThrows(() => constructGraphV0({ edges: [] } as never), "Protocol graph construction must reject raw-edge inputs");
+	  const tamperedVectorUnsigned = { ...vector, feature_commitment: fakeHash, cluster_concentration_bps: 9999, signature: "0x00" as const };
+	  const tamperedVector = { ...tamperedVectorUnsigned, signature: signEd25519(graphFeatureVectorV1Hash(tamperedVectorUnsigned), aSeed) };
+	  const tamperedGraphResult = await verifyTSL(
+	    { envelope: eventAB.envelope, graph_profile: graphProfile, graph_feature_vector: tamperedVector, event_receivers: { [eventAB.commitment_hash]: b.id } },
+	    resolver,
+	    { require_graph_artifacts: true }
+	  );
+	  assert(!tamperedGraphResult.verified && tamperedGraphResult.errors.includes("TSL_GRAPH_ARTIFACTS_INVALID"), "Graph recomputation must compare feature_commitment and cluster_concentration_bps");
+	  const disputedReceipt = signReceipt(
+	    {
+	      type: "tsl.receipt_commitment.v1",
+	      event_commitment: eventAB.commitment_hash,
+	      receiver: b.id,
+	      signing_key_id: "#key",
+	      receipt_class: "disputed",
+	      timestamp: "2026-05-27T12:00:01Z",
+	      metadata_commitment: fakeHash
+	    },
+	    bSeed
+	  );
+	  let negativeEvidenceRejected = false;
+	  try {
+	    await constructGraphFromEvidenceV0({
+	      events: [eventAB.envelope],
+	      receipts: [disputedReceipt],
+	      resolver,
+	      graph_profile: graphProfile,
+	      at_time: "2026-05-27T12:00:00Z"
+	    });
+	  } catch (error) {
+	    negativeEvidenceRejected = error instanceof Error && error.message === "TSL_NEGATIVE_EVIDENCE_INCOMPLETE";
+	  }
+	  assert(negativeEvidenceRejected, "Negative graph evidence without appeal metadata must fail strict conformance");
 
   const sybil = computeSybilAssessmentV0({
     subject: "did:tsl:a",
@@ -721,8 +760,20 @@ async function checkSemanticConformance(): Promise<void> {
     },
     trusted_seeds: ["did:tsl:c"],
     computed_at: "2026-05-27T12:00:00Z"
-  });
-  assert(sybil.risk_label === "high", `Sybil vector risk mismatch: ${sybil.risk_label}`);
+	  });
+	  assert(sybil.risk_label === "high", `Sybil vector risk mismatch: ${sybil.risk_label}`);
+	  const b5Sybil = computeSybilAssessmentV0({
+	    subject: "did:tsl:a",
+	    graph,
+	    graph_profile: graphProfile,
+	    sybil_profile: {
+	      profile_id: "sybil-b5-conformance",
+	      adversary_tier: "B5",
+	      infrastructure_collusion_signals: { checkpoint_conflict_bps: 9000, provider_auditor_disagreement_bps: 8000, settlement_anomaly_bps: 7000 }
+	    },
+	    computed_at: "2026-05-27T12:00:00Z"
+	  });
+	  assert(b5Sybil.risk_label === "high" && b5Sybil.scenario_evidence_checks?.includes("settlement_anomaly"), "B5 Sybil conformance must consume infrastructure-collusion signals");
 
   const drift = computeDriftReportV0({
     subject: "did:tsl:a",

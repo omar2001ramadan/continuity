@@ -14,6 +14,7 @@ export interface VerificationMethodV1 {
   status: VerificationKeyStatus;
   created_at: RFC3339;
   expires_at?: RFC3339;
+  revoked_at?: RFC3339;
 }
 
 export interface IdentityDocumentV1 {
@@ -61,6 +62,14 @@ export interface ReceiptCommitmentV1 {
 }
 
 export type ReceiptCommitmentUnsignedV1 = Omit<ReceiptCommitmentV1, "signature">;
+
+export interface ReceiptDisputeMetadataV1 {
+  evidence_commitment: Hex32;
+  appeal_uri?: string;
+  appeal_status?: "none" | "submitted" | "under_review" | "upheld" | "reversed" | "expired" | "escalated";
+  reversal_status?: "none" | "pending" | "reversed" | "upheld";
+  severity?: "low" | "medium" | "high" | "critical";
+}
 
 export interface AttestationUnsignedV1 {
   type: "tsl.attestation.v1";
@@ -151,6 +160,18 @@ export interface BatchCheckpointV1 {
   settlement_tx?: string;
   relay_id: TrustID;
   relay_signature: HexSig;
+}
+
+export interface SettlementEvidenceV1 {
+  type: "tsl.settlement_evidence.v1";
+  checkpoint_hash: Hex32;
+  settlement_backend: string;
+  chain_id?: number;
+  contract_address?: string;
+  contract_checkpoint_hash?: Hex32;
+  settlement_tx: string;
+  submitted_at: RFC3339;
+  status: "submitted" | "settled" | "failed";
 }
 
 export interface TrustAssessmentV1 {
@@ -420,6 +441,8 @@ export interface GraphFeatureVectorV1 {
   ppr_lite_bps?: number;
   modularity_bps?: number;
   community_pass_count?: number;
+  cluster_concentration_bps?: number;
+  feature_commitment?: Hex32;
   recomputation_commitment?: Hex32;
   privacy_disclosure_level: "aggregate_only" | "pairwise" | "local_only" | "public";
   signature: HexSig;
@@ -448,31 +471,61 @@ export interface SybilAssessmentV1 {
   seed_contamination_bps?: number;
   receipt_symmetry_bps?: number;
   attack_cost_minor_units: number;
-  cost_components: {
-    identity_cost_minor_units: number;
-    time_aging_cost_minor_units: number;
-    external_receipt_cost_minor_units: number;
-    attestation_cost_minor_units: number;
-    compromise_cost_minor_units: number;
-    evasion_cost_minor_units: number;
-  };
-  expected_benefit_minor_units: number;
-  attack_scenario: string;
-  risk_score_bps: number;
-  risk_label: "low" | "medium" | "elevated" | "high" | "insufficient_evidence";
-  privacy_level: "cluster_commitment_only" | "aggregate_only" | "local_only";
-  signature: HexSig;
+	  cost_components: {
+	    identity_cost_minor_units: number;
+	    time_aging_cost_minor_units: number;
+	    external_receipt_cost_minor_units: number;
+	    attestation_cost_minor_units: number;
+	    compromise_cost_minor_units: number;
+	    evasion_cost_minor_units: number;
+	    issuer_collusion_cost_minor_units?: number;
+	    infrastructure_consistency_cost_minor_units?: number;
+	  };
+	  expected_benefit_minor_units: number;
+	  attack_scenario: string;
+	  compromise_signals?: SybilCompromiseSignalsV1;
+	  issuer_collusion_signals?: SybilIssuerCollusionSignalsV1;
+	  infrastructure_collusion_signals?: SybilInfrastructureCollusionSignalsV1;
+	  scenario_evidence_checks?: string[];
+	  risk_score_bps: number;
+	  risk_label: "low" | "medium" | "elevated" | "high" | "insufficient_evidence";
+	  privacy_level: "cluster_commitment_only" | "aggregate_only" | "local_only";
+	  signature: HexSig;
+	}
+
+	export type SybilAssessmentUnsignedV1 = Omit<SybilAssessmentV1, "signature">;
+
+export interface SybilCompromiseSignalsV1 {
+  key_revocation_bps?: number;
+  severe_drift_bps?: number;
+  recovery_anomaly_bps?: number;
 }
 
-export type SybilAssessmentUnsignedV1 = Omit<SybilAssessmentV1, "signature">;
+export interface SybilIssuerCollusionSignalsV1 {
+  issuer_reversal_bps?: number;
+  issuer_reuse_bps?: number;
+  low_quality_issuer_bps?: number;
+  collusion_indicator_bps?: number;
+}
+
+export interface SybilInfrastructureCollusionSignalsV1 {
+  checkpoint_conflict_bps?: number;
+  provider_auditor_disagreement_bps?: number;
+  settlement_anomaly_bps?: number;
+}
 
 export interface DriftReportV1 {
   type: "tsl.drift_report.v1";
   subject: TrustID;
+  issuer?: TrustID;
   drift_profile_id?: string;
   computed_at: RFC3339;
   baseline_window_days: number;
   observation_window_days: number;
+  coverage_bps?: number;
+  dcrit_bps?: number;
+  dormant_penalty_bps?: number;
+  key_penalty_bps?: number;
   feature_history_commitment?: Hex32;
   baseline_profile_commitment?: Hex32;
   covariance_profile_commitment?: Hex32;
@@ -754,12 +807,15 @@ export interface ProofBundleV1 {
   created_at: RFC3339;
   identity: IdentityDocumentV1;
   envelope: EventCommitmentV1;
-  proof: InclusionProofV1;
-  checkpoint: BatchCheckpointV1;
-  receipts?: ReceiptCommitmentV1[];
-  attestations?: AttestationV1[];
-  revocations?: RevocationV1[];
-  assessment?: TrustAssessmentV1 | null;
+	  proof: InclusionProofV1;
+	  checkpoint: BatchCheckpointV1;
+	  receipts?: ReceiptCommitmentV1[];
+	  attestations?: AttestationV1[];
+	  attestations_v2?: AttestationV2[];
+	  receipt_disputes?: Record<Hex32, ReceiptDisputeMetadataV1>;
+	  revocations?: RevocationV1[];
+	  settlement_evidence?: SettlementEvidenceV1[];
+	  assessment?: TrustAssessmentV1 | null;
   assessment_v2?: TrustAssessmentV2 | null;
   scoring_profile?: ScoringProfileV2;
   domain_policy?: DomainPolicyV1;
@@ -840,9 +896,14 @@ export interface VerifierPolicy {
   require_authorized_relay?: boolean;
   authorized_relays?: TrustID[];
   require_receipt_inclusion_for_disclosed_receipts?: boolean;
+  require_disclosure_consent_for_private_fields?: boolean;
   require_profile_derived_scoring?: boolean;
   require_behavioral_sybil_tiers?: boolean;
   require_fixed_point_drift?: boolean;
+  require_four_root_checkpoint?: boolean;
+  require_exact_graph_formulas?: boolean;
+  require_core_drift_formula?: boolean;
+  require_profile_signed_scoring?: boolean;
   reject_unsafe_fixtures_on_mainnet?: boolean;
   accepted_auditors?: TrustID[];
   accepted_governance_policy?: string;
@@ -888,6 +949,7 @@ export interface VerificationChecks {
   evidence_coverage_valid?: boolean;
   metadata_fingerprint_valid?: boolean;
   disclosure_consent_valid?: boolean;
+  redaction_manifest_valid?: boolean;
   checkpoint_signature_valid?: boolean;
   graph_artifacts_valid?: boolean;
   sybil_assessment_valid?: boolean;
@@ -911,14 +973,18 @@ export interface VerificationResult {
 }
 
 export interface VerifyTSLInput {
+  proof_bundle?: ProofBundleV1;
   envelope: EventCommitmentV1;
   proof?: InclusionProofV1;
-  receipt_proofs?: InclusionProofV1[];
-  checkpoint?: BatchCheckpointV1;
-  receipts?: ReceiptCommitmentV1[];
-  attestations?: AttestationV1[];
-  revocations?: RevocationV1[];
-  assessment?: TrustAssessmentV1;
+	  receipt_proofs?: InclusionProofV1[];
+	  checkpoint?: BatchCheckpointV1;
+	  receipts?: ReceiptCommitmentV1[];
+	  attestations?: AttestationV1[];
+	  attestations_v2?: AttestationV2[];
+	  receipt_disputes?: Record<Hex32, ReceiptDisputeMetadataV1>;
+	  revocations?: RevocationV1[];
+	  settlement_evidence?: SettlementEvidenceV1[];
+	  assessment?: TrustAssessmentV1;
   assessment_v2?: TrustAssessmentV2;
   scoring_profile?: ScoringProfileV2;
   domain_policy?: DomainPolicyV1;
@@ -948,10 +1014,13 @@ export interface VerifyTSLInput {
     attestation_cost_minor_units?: number;
     compromise_cost_minor_units?: number;
     evasion_cost_minor_units?: number;
-    internal_edge_cost_minor_units?: number;
-    expected_benefit_minor_units?: number;
-    attack_scenario?: string;
-  };
+	    internal_edge_cost_minor_units?: number;
+	    expected_benefit_minor_units?: number;
+	    attack_scenario?: string;
+	    compromise_signals?: SybilCompromiseSignalsV1;
+	    issuer_collusion_signals?: SybilIssuerCollusionSignalsV1;
+	    infrastructure_collusion_signals?: SybilInfrastructureCollusionSignalsV1;
+	  };
   drift_report?: DriftReportV1;
   drift_feature_history?: Array<{
     timestamp: RFC3339;
@@ -972,6 +1041,7 @@ export interface VerifyTSLInput {
   consistency_proofs?: ConsistencyProofV1[];
   non_membership_proofs?: SetNonMembershipProofV1[];
   governance_policy?: GovernancePolicyV1;
+  redaction_manifest?: ProofBundleV1["redaction_manifest"];
   message_disclosure?: MessageDisclosure;
   disclosure_consents?: DisclosureConsentV1[];
 }

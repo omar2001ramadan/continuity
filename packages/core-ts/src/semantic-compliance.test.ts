@@ -8,9 +8,11 @@ import {
   eventHash,
   hashDomain,
   legacyCommitmentHashFromParts,
-  sha256Hex,
-  signEd25519,
-  signReceipt,
+	  sha256Hex,
+	  signEd25519,
+	  signAttestation,
+	  signReceipt,
+	  signRevocation,
   verifyTSL,
   buildThresholdProof,
   buildSparseMerkleTree,
@@ -27,9 +29,10 @@ import {
 import { InMemoryRelayStore, RelayValidationError } from "./relayStore";
 import type { BatchCheckpointV1, DelegationPolicyV2, Hex32 } from "./types";
 import {
-  buildAgentActionV2,
-  buildDelegationPolicyV2,
-  computeDriftReportV0,
+	  buildAgentActionV2,
+	  buildDelegationPolicyV2,
+	  attestationV2Hash,
+	  computeDriftReportV0,
   computeEvidenceCoverageV0,
   computeGraphFeatureVectorV0,
   computeMetadataFingerprintCommitmentV0,
@@ -253,11 +256,85 @@ describe("semantic compliance hardening", () => {
     expect(filtered.receipts).toBeUndefined();
     expect(filtered.attestations?.map((attestation) => attestation.visibility)).toEqual(["public"]);
     expect(filtered.redaction_manifest.exact_counterparties_included).toBe(false);
-    expect(filtered.redaction_manifest.metadata_fields_redacted).toContain("exact_counterparties");
-    expect(filtered.redaction_manifest.metadata_fields_redacted).toContain("restricted_attestations");
-  });
+	  expect(filtered.redaction_manifest.metadata_fields_redacted).toContain("exact_counterparties");
+	  expect(filtered.redaction_manifest.metadata_fields_redacted).toContain("restricted_attestations");
+	});
 
-  it("rejects raw-edge protocol graph input and recomputes event-only graph claims", async () => {
+	  it("requires consent for bundled receipts, private attestations, and redaction-manifest accuracy", async () => {
+	    const alice = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#alice", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
+	    const bob = buildIdentityFromSeed({ trust_id: "did:tsl:test:bob", key_id: "#bob", seed_hex: bobSeed, created_at: "2026-01-01T00:00:00Z" });
+	    const signed = signMessageEvent({ sender: alice.id, signing_key_id: "#alice", seed_hex: aliceSeed, message: "bundle", timestamp: at });
+	    const resolver = { resolveTrustID: (trustId: string) => (trustId === bob.id ? bob : alice) };
+	    const receipt = signReceipt(
+	      {
+	        type: "tsl.receipt_commitment.v1",
+	        event_commitment: signed.commitment_hash,
+	        receiver: bob.id,
+	        signing_key_id: "#bob",
+	        receipt_class: "received",
+	        timestamp: at
+	      },
+	      bobSeed
+	    );
+	    const receiptResult = await verifyTSL(
+	      {
+	        envelope: signed.envelope,
+	        receipts: [receipt],
+	        redaction_manifest: {
+	          raw_content_included: false,
+	          exact_counterparties_included: true,
+	          metadata_fields_redacted: ["raw_content", "content_salt"]
+	        }
+	      },
+	      resolver
+	    );
+	    expect(receiptResult.verified).toBe(false);
+	    expect(receiptResult.errors).toContain("TSL_DISCLOSURE_CONSENT_REQUIRED");
+
+	    const privateAttestation = signAttestation(
+	      {
+	        type: "tsl.attestation.v1",
+	        issuer: bob.id,
+	        subject: alice.id,
+	        attestation_class: "private_claim",
+	        claim_commitment: sha256Hex("private"),
+	        visibility: "private",
+	        issued_at: at
+	      },
+	      bobSeed
+	    );
+	    const attestationResult = await verifyTSL(
+	      {
+	        envelope: signed.envelope,
+	        attestations: [privateAttestation],
+	        redaction_manifest: {
+	          raw_content_included: false,
+	          exact_counterparties_included: false,
+	          metadata_fields_redacted: ["raw_content", "content_salt", "exact_counterparties"]
+	        }
+	      },
+	      resolver
+	    );
+	    expect(attestationResult.verified).toBe(false);
+	    expect(attestationResult.errors).toContain("TSL_DISCLOSURE_CONSENT_REQUIRED");
+
+	    const manifestMismatch = await verifyTSL(
+	      {
+	        envelope: signed.envelope,
+	        message_disclosure: { raw_message: "bundle", content_salt: signed.content_salt },
+	        redaction_manifest: {
+	          raw_content_included: false,
+	          exact_counterparties_included: false,
+	          metadata_fields_redacted: ["raw_content", "content_salt", "exact_counterparties"]
+	        }
+	      },
+	      resolver
+	    );
+	    expect(manifestMismatch.verified).toBe(false);
+	    expect(manifestMismatch.errors).toContain("TSL_REDACTION_MANIFEST_INVALID");
+	  });
+
+	  it("rejects raw-edge protocol graph input and recomputes event-only graph claims", async () => {
     expect(() => constructGraphV0({ edges: [] } as never)).toThrow(/TSL_RAW_EDGE_PROTOCOL_INPUT_REJECTED/);
 
     const identity = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#key-1", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
@@ -286,7 +363,113 @@ describe("semantic compliance hardening", () => {
       { require_graph_artifacts: true }
     );
     expect(result.verified).toBe(false);
+	    expect(result.errors).toContain("TSL_GRAPH_ARTIFACTS_INVALID");
+	  });
+
+  it("rejects tampered graph feature commitments during recomputation", async () => {
+    const identity = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#key-1", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
+    const receiver = "did:tsl:test:bob";
+    const signed = signMessageEvent({ sender: identity.id, signing_key_id: "#key-1", seed_hex: aliceSeed, message: "graph-commitment", timestamp: at });
+    const graphProfile = {
+      type: "tsl.graph_profile.v2" as const,
+      profile_id: "graph-default-rc4",
+      edge_weight_profile: "default",
+      temporal_decay_profile: "none",
+      community_detection: { algorithm: "connected_components_v0" as const, resolution_bps: 10000, min_cluster_size: 1 },
+      seed_sets: { trusted_seed_commitment: zero, adversarial_seed_commitment: zero },
+      negative_edge_policy: { requires_evidence_commitment: true, requires_appeal_uri: true, max_single_negative_weight_bps: 1500, decay_days: 30 },
+      privacy_policy: { raw_counterparty_upload_required: false, allows_pairwise_private_features: true }
+    };
+    const graph = await constructGraphFromEvidenceV0({
+      events: [signed.envelope],
+      resolver: { resolveTrustID: (trustId: string) => (trustId === identity.id ? identity : null) },
+      graph_profile: graphProfile,
+      at_time: at,
+      event_receivers: { [signed.commitment_hash]: receiver }
+    });
+    const vectorUnsigned = computeGraphFeatureVectorV0({
+      subject: identity.id,
+      graph,
+      graph_profile_id: graphProfile.profile_id,
+      graph_profile: graphProfile,
+      computed_at: at
+    });
+    const tamperedUnsigned = { ...vectorUnsigned, feature_commitment: zero, cluster_concentration_bps: 9999 };
+    const tampered = { ...tamperedUnsigned, signature: signEd25519(graphFeatureVectorV1Hash(tamperedUnsigned), aliceSeed) };
+    const result = await verifyTSL(
+      { envelope: signed.envelope, graph_profile: graphProfile, graph_feature_vector: tampered, event_receivers: { [signed.commitment_hash]: receiver } },
+      { resolveTrustID: (trustId: string) => (trustId === identity.id ? identity : null) },
+      { require_graph_artifacts: true }
+    );
+    expect(result.verified).toBe(false);
     expect(result.errors).toContain("TSL_GRAPH_ARTIFACTS_INVALID");
+  });
+
+  it("requires appeal/evidence metadata for negative graph evidence", async () => {
+    const alice = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#alice", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
+    const bob = buildIdentityFromSeed({ trust_id: "did:tsl:test:bob", key_id: "#bob", seed_hex: bobSeed, created_at: "2026-01-01T00:00:00Z" });
+    const resolver = { resolveTrustID: (trustId: string) => (trustId === alice.id ? alice : trustId === bob.id ? bob : null) };
+    const signed = signMessageEvent({ sender: alice.id, signing_key_id: "#alice", seed_hex: aliceSeed, message: "negative", timestamp: at });
+    const disputed = signReceipt(
+      {
+        type: "tsl.receipt_commitment.v1",
+        event_commitment: signed.commitment_hash,
+        receiver: bob.id,
+        signing_key_id: "#bob",
+        receipt_class: "disputed",
+        timestamp: at,
+        metadata_commitment: sha256Hex("dispute")
+      },
+      bobSeed
+    );
+    const graphProfile = {
+      type: "tsl.graph_profile.v2" as const,
+      profile_id: "graph-negative-rc4",
+      edge_weight_profile: "default",
+      temporal_decay_profile: "none",
+      community_detection: { algorithm: "connected_components_v0" as const, resolution_bps: 10000, min_cluster_size: 1 },
+      seed_sets: { trusted_seed_commitment: zero, adversarial_seed_commitment: zero },
+      negative_edge_policy: { requires_evidence_commitment: true, requires_appeal_uri: true, max_single_negative_weight_bps: 1500, decay_days: 30 },
+      privacy_policy: { raw_counterparty_upload_required: false, allows_pairwise_private_features: true }
+    };
+    await expect(
+      constructGraphFromEvidenceV0({
+        events: [signed.envelope],
+        receipts: [disputed],
+        resolver,
+        graph_profile: graphProfile,
+        at_time: at
+      })
+    ).rejects.toThrow(/TSL_NEGATIVE_EVIDENCE_INCOMPLETE/);
+
+    const issuer = buildIdentityFromSeed({ trust_id: "did:tsl:test:issuer", key_id: "default", seed_hex: agentSeed, created_at: "2026-01-01T00:00:00Z" });
+    const negativeUnsigned = {
+      type: "tsl.attestation.v2" as const,
+      attestation_id: sha256Hex("negative-attestation"),
+      issuer: issuer.id,
+      subject: alice.id,
+      claim_class: "scam_warning",
+      claim_polarity: "negative" as const,
+      severity: "high" as const,
+      claim_commitment: sha256Hex("negative-claim"),
+      evidence_commitment: sha256Hex("negative-evidence"),
+      evidence_policy: "public" as const,
+      visibility: "public" as const,
+      appeal_uri: "https://appeals.example.test/negative-attestation",
+      issued_at: at,
+      valid_after: at,
+      expires_at: "2026-06-27T12:00:00Z",
+      revocation_pointer: "urn:tsl:revocation:negative-attestation",
+      appeal_status: "under_review" as const
+    };
+    const graph = await constructGraphFromEvidenceV0({
+      attestations_v2: [{ ...negativeUnsigned, signature: signEd25519(attestationV2Hash(negativeUnsigned), agentSeed) }],
+      resolver: { resolveTrustID: (trustId: string) => (trustId === issuer.id ? issuer : trustId === alice.id ? alice : null) },
+      graph_profile: graphProfile,
+      at_time: at
+    });
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.edges[0]).toMatchObject({ type: "attestation:negative:scam_warning", appeal_status: "under_review" });
   });
 
   it("supports deterministic louvain/leiden aliases and PageRank-like seed distance fields", async () => {
@@ -389,11 +572,59 @@ describe("semantic compliance hardening", () => {
       computed_at: at
     });
     expect(sybil.risk_label).toBe("high");
-    expect(sybil.cluster_concentration_bps).toBeGreaterThan(9000);
-    expect(sybil.trusted_escape_bps).toBeGreaterThan(0);
-    expect(sybil.receipt_symmetry_bps).toBe(10000);
+	    expect(sybil.cluster_concentration_bps).toBeGreaterThan(9000);
+	    expect(sybil.trusted_escape_bps).toBeGreaterThan(0);
+	    expect(sybil.receipt_symmetry_bps).toBe(10000);
 
-    const drift = computeDriftReportV0({
+    const compromised = computeSybilAssessmentV0({
+      subject: "did:tsl:a",
+      graph,
+      graph_profile: {
+        type: "tsl.graph_profile.v2",
+        profile_id: "graph-default-rc4",
+        edge_weight_profile: "default",
+        temporal_decay_profile: "none",
+        community_detection: { algorithm: "connected_components", resolution_bps: 10000, min_cluster_size: 1 },
+        seed_sets: { trusted_seed_commitment: zero, adversarial_seed_commitment: zero },
+        negative_edge_policy: { requires_evidence_commitment: true, requires_appeal_uri: true, max_single_negative_weight_bps: 1500, decay_days: 30 },
+        privacy_policy: { raw_counterparty_upload_required: false, allows_pairwise_private_features: true }
+      },
+      sybil_profile: {
+        profile_id: "sybil-b3-compromise",
+        adversary_tier: "B3",
+        compromise_cost_minor_units: 50000,
+        compromise_signals: { key_revocation_bps: 8000, severe_drift_bps: 7000, recovery_anomaly_bps: 6000 }
+      },
+      computed_at: at
+    });
+    expect(compromised.compromise_signals?.key_revocation_bps).toBe(8000);
+    expect(compromised.scenario_evidence_checks).toContain("key_revocation");
+    expect(["elevated", "high"]).toContain(compromised.risk_label);
+
+    const collusive = computeSybilAssessmentV0({
+      subject: "did:tsl:a",
+      graph,
+      graph_profile: {
+        type: "tsl.graph_profile.v2",
+        profile_id: "graph-default-rc4",
+        edge_weight_profile: "default",
+        temporal_decay_profile: "none",
+        community_detection: { algorithm: "connected_components", resolution_bps: 10000, min_cluster_size: 1 },
+        seed_sets: { trusted_seed_commitment: zero, adversarial_seed_commitment: zero },
+        negative_edge_policy: { requires_evidence_commitment: true, requires_appeal_uri: true, max_single_negative_weight_bps: 1500, decay_days: 30 },
+        privacy_policy: { raw_counterparty_upload_required: false, allows_pairwise_private_features: true }
+      },
+      sybil_profile: {
+        profile_id: "sybil-b5-infra",
+        adversary_tier: "B5",
+        infrastructure_collusion_signals: { checkpoint_conflict_bps: 9000, provider_auditor_disagreement_bps: 8000, settlement_anomaly_bps: 7000 }
+      },
+      computed_at: at
+    });
+    expect(collusive.risk_label).toBe("high");
+    expect(collusive.scenario_evidence_checks).toContain("settlement_anomaly");
+
+	    const drift = computeDriftReportV0({
       subject: "did:tsl:a",
       feature_history: [
         { timestamp: "2026-04-20T12:00:00Z", verified_event: true, components: { action: 1000, cadence: 900, graph: 1000 } },
@@ -512,7 +743,7 @@ describe("semantic compliance hardening", () => {
       { resolveTrustID: () => identity }
     );
     expect(result.verified).toBe(false);
-    expect(result.errors).toContain("TSL_DISCLOSURE_CONSENT_MISSING");
+    expect(result.errors).toContain("TSL_DISCLOSURE_CONSENT_REQUIRED");
   });
 
   it("requires signed disclosure consent bound to verifier and purpose", async () => {
@@ -537,16 +768,22 @@ describe("semantic compliance hardening", () => {
       revocation_pointer: "rev:consent:1",
       signature: "0x00" as const
     };
-    const consent = { ...unsignedConsent, signature: signEd25519(disclosureConsentV1Hash(unsignedConsent), aliceSeed) };
-    const accepted = await verifyTSL(
-      {
-        envelope: signed.envelope,
+	    const consent = { ...unsignedConsent, signature: signEd25519(disclosureConsentV1Hash(unsignedConsent), aliceSeed) };
+	    const disclosureManifest = {
+	      raw_content_included: true,
+	      exact_counterparties_included: false,
+	      metadata_fields_redacted: ["exact_counterparties", "platform", "ip_address", "user_agent"]
+	    };
+	    const accepted = await verifyTSL(
+	      {
+	        envelope: signed.envelope,
         message_disclosure: {
           raw_message: "private",
-          content_salt: "0x9999999999999999999999999999999999999999999999999999999999999999"
-        },
-        disclosure_consents: [consent]
-      },
+	          content_salt: "0x9999999999999999999999999999999999999999999999999999999999999999"
+	        },
+	        redaction_manifest: disclosureManifest,
+	        disclosure_consents: [consent]
+	      },
       { resolveTrustID: () => identity },
       { verifier_or_provider: "did:tsl:verifier:local", disclosure_purpose: "verification_opening" }
     );
@@ -556,17 +793,18 @@ describe("semantic compliance hardening", () => {
     const wrongPurpose = await verifyTSL(
       {
         envelope: signed.envelope,
-        message_disclosure: {
-          raw_message: "private",
-          content_salt: "0x9999999999999999999999999999999999999999999999999999999999999999"
-        },
-        disclosure_consents: [consent]
-      },
+	        message_disclosure: {
+	          raw_message: "private",
+	          content_salt: "0x9999999999999999999999999999999999999999999999999999999999999999"
+	        },
+	        redaction_manifest: disclosureManifest,
+	        disclosure_consents: [consent]
+	      },
       { resolveTrustID: () => identity },
       { verifier_or_provider: "did:tsl:verifier:local", disclosure_purpose: "scoring_upload" }
     );
     expect(wrongPurpose.verified).toBe(false);
-    expect(wrongPurpose.errors).toContain("TSL_DISCLOSURE_CONSENT_MISSING");
+    expect(wrongPurpose.errors).toContain("TSL_DISCLOSURE_CONSENT_REQUIRED");
   });
 
   it("rejects hash-only ZK fixtures unless unsafe test mode is explicit", async () => {
@@ -681,10 +919,11 @@ describe("semantic compliance hardening", () => {
       previous_checkpoint: zero,
       relay_id: relay.id,
       relay_signature: "0x00"
-    };
-    const checkpoint = { ...checkpointBase, relay_signature: signEd25519(checkpointHash(checkpointBase), relaySeed) };
-    expect(checkpointHash({ ...checkpointBase, settlement_backend: "eip155:1", settlement_tx: "0xabc" })).not.toBe(checkpointHash(checkpointBase));
-    const absent = proveSparseMerkleNonMembership(sha256Hex("not-revoked") as Hex32, tree, identity.id, at, checkpointHash(checkpoint));
+	    };
+	    const checkpoint = { ...checkpointBase, relay_signature: signEd25519(checkpointHash(checkpointBase), relaySeed) };
+	    expect(checkpointHash({ ...checkpointBase, settlement_backend: "eip155:1" })).not.toBe(checkpointHash(checkpointBase));
+	    expect(checkpointHash({ ...checkpointBase, settlement_tx: "0xabc" })).toBe(checkpointHash(checkpointBase));
+	    const absent = proveSparseMerkleNonMembership(sha256Hex("not-revoked") as Hex32, tree, identity.id, at, checkpointHash(checkpoint));
     const accepted = await verifyTSL(
       { envelope: signed.envelope, checkpoint, non_membership_proofs: [absent] },
       { resolveTrustID: (trustId: string) => (trustId === identity.id ? identity : trustId === relay.id ? relay : null) },
@@ -819,11 +1058,12 @@ describe("semantic compliance hardening", () => {
     expect(verifyDelegatedAgentActionV0({ action, delegation_chain: [allow], public_keys, parameters: { ...params, value_minor_units: 901 } }).error_code).toBe("TSL_DELEGATION_CONSTRAINT_VIOLATION");
   });
 
-  it("freezes checkpointed log segments", async () => {
-    const settlement: SettlementBackend = {
-      async submitCheckpoint(checkpoint: BatchCheckpointV1) {
-        return { ...checkpoint, settlement_backend: "local", settlement_tx: "0xsettled" };
-      },
+	  it("freezes checkpointed log segments", async () => {
+	    const settlement: SettlementBackend = {
+	      settlementBackendId: "local",
+	      async submitCheckpoint(checkpoint: BatchCheckpointV1) {
+	        return { ...checkpoint, settlement_tx: "0xsettled" };
+	      },
       async verifyCheckpointSettlement() {
         return { settled: true };
       },
@@ -832,21 +1072,67 @@ describe("semantic compliance hardening", () => {
       }
     };
     const store = new InMemoryRelayStore({ settlement_backend: settlement, timestamp_window_ms: Number.MAX_SAFE_INTEGER });
-    const identity = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#key-1", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
-    store.upsertIdentity(identity);
-    const first = signMessageEvent({ sender: identity.id, signing_key_id: "#key-1", seed_hex: aliceSeed, message: "first", timestamp: at });
-    const accepted = await store.acceptEvent(first.envelope);
-    await store.submitCheckpoint(accepted.epoch_start_ms, accepted.shard);
-    const second = signMessageEvent({
-      sender: identity.id,
-      signing_key_id: "#key-1",
+	    const identity = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#key-1", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
+	    store.upsertIdentity(identity);
+	    const first = signMessageEvent({ sender: identity.id, signing_key_id: "#key-1", seed_hex: aliceSeed, message: "first", timestamp: at });
+	    const accepted = await store.acceptEvent(first.envelope);
+	    const receipt = signReceipt(
+	      {
+	        type: "tsl.receipt_commitment.v1",
+	        event_commitment: first.commitment_hash,
+	        receiver: identity.id,
+	        signing_key_id: "#key-1",
+	        receipt_class: "received",
+	        timestamp: at
+	      },
+	      aliceSeed
+	    );
+	    const attestation = signAttestation(
+	      {
+	        type: "tsl.attestation.v1",
+	        issuer: identity.id,
+	        subject: identity.id,
+	        attestation_class: "self_audit",
+	        claim_commitment: sha256Hex("self-audit"),
+	        visibility: "public",
+	        issued_at: at
+	      },
+	      aliceSeed
+	    );
+	    const revocation = signRevocation(
+	      {
+	        type: "tsl.revocation.v1",
+	        trust_id: identity.id,
+	        revoked_key: "#old-key",
+	        reason_class: "rotation",
+	        effective_at: at
+	      },
+	      aliceSeed
+	    );
+	    store.acceptReceipt(receipt);
+	    store.acceptAttestation(attestation);
+	    store.acceptRevocation(revocation);
+		    const preSettlementCheckpoint = store.checkpointFor(accepted.epoch_start_ms, accepted.shard);
+		    const checkpoint = await store.submitCheckpoint(accepted.epoch_start_ms, accepted.shard);
+		    expect(checkpoint.relay_signature).toBe(preSettlementCheckpoint.relay_signature);
+		    expect(checkpointHash(checkpoint)).toBe(checkpointHash(preSettlementCheckpoint));
+		    expect(checkpoint.settlement_backend).toBe("local");
+		    expect(checkpoint.receipt_root).not.toBe(zero);
+	    expect(checkpoint.attestation_root).not.toBe(zero);
+	    expect(checkpoint.revocation_root).not.toBe(zero);
+	    const second = signMessageEvent({
+	      sender: identity.id,
+	      signing_key_id: "#key-1",
       seed_hex: aliceSeed,
       message: "second",
       timestamp: at,
       nonce: "0x7777777777777777777777777777777777777777777777777777777777777777"
-    });
-    await expect(store.acceptEvent(second.envelope)).rejects.toMatchObject({ code: "TSL_LOG_SEGMENT_CLOSED" } satisfies Partial<RelayValidationError>);
-  });
+	    });
+	    await expect(store.acceptEvent(second.envelope)).rejects.toMatchObject({ code: "TSL_LOG_SEGMENT_CLOSED" } satisfies Partial<RelayValidationError>);
+	    await expect(async () => store.acceptReceipt({ ...receipt, timestamp: "2026-05-27T12:00:01Z" })).rejects.toMatchObject({ code: "TSL_LOG_SEGMENT_CLOSED" } satisfies Partial<RelayValidationError>);
+	    expect(() => store.acceptAttestation({ ...attestation, issued_at: "2026-05-27T12:00:01Z" })).toThrow(/Cannot append/);
+	    expect(() => store.acceptRevocation({ ...revocation, effective_at: "2026-05-27T12:00:01Z" })).toThrow(/Cannot append/);
+	  });
 
   it("keeps MAINNET conformance blocked until production evidence is approved", () => {
     expect(() => execFileSync("npx", ["tsx", "scripts/conformance.ts", "mainnet"], { cwd: process.cwd(), stdio: "pipe" })).toThrow(

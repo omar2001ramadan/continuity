@@ -25,9 +25,11 @@ function identityDocuments(bundle: ProofBundleV1): IdentityDocumentV1[] {
 
 function verificationInput(bundle: ProofBundleV1): VerifyTSLInput {
   return {
+    proof_bundle: bundle,
     envelope: bundle.envelope,
     proof: bundle.proof,
     checkpoint: bundle.checkpoint,
+    redaction_manifest: bundle.redaction_manifest,
     receipts: bundle.receipts,
     attestations: bundle.attestations,
     revocations: bundle.revocations,

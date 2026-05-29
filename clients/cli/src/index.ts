@@ -177,11 +177,13 @@ async function verifyBundle(bundle: Record<string, unknown>, defaultPolicy: Veri
   if (Array.isArray(bundle.identities)) identities.push(...(bundle.identities as IdentityDocumentV1[]));
 
   const resolver = new MemoryTrustResolver(identities);
-  const input: VerifyTSLInput = {
-    envelope: bundle.envelope as VerifyTSLInput["envelope"],
-    proof: bundle.proof as VerifyTSLInput["proof"],
-    checkpoint: bundle.checkpoint as VerifyTSLInput["checkpoint"],
-    message_disclosure: bundle.message_disclosure as VerifyTSLInput["message_disclosure"],
+	  const input: VerifyTSLInput = {
+	    proof_bundle: bundle.type === "tsl.proof_bundle.v1" ? (bundle as unknown as VerifyTSLInput["proof_bundle"]) : undefined,
+	    envelope: bundle.envelope as VerifyTSLInput["envelope"],
+	    proof: bundle.proof as VerifyTSLInput["proof"],
+	    checkpoint: bundle.checkpoint as VerifyTSLInput["checkpoint"],
+	    redaction_manifest: bundle.redaction_manifest as VerifyTSLInput["redaction_manifest"],
+	    message_disclosure: bundle.message_disclosure as VerifyTSLInput["message_disclosure"],
     receipts: bundle.receipts as VerifyTSLInput["receipts"],
     attestations: bundle.attestations as VerifyTSLInput["attestations"],
     revocations: bundle.revocations as VerifyTSLInput["revocations"],

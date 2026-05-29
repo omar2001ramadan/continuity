@@ -22,6 +22,10 @@
       "type": "string",
       "pattern": "^did:tsl:"
     },
+    "issuer": {
+      "type": "string",
+      "pattern": "^did:tsl:"
+    },
     "drift_profile_id": {
       "type": "string"
     },
@@ -36,6 +40,26 @@
     "observation_window_days": {
       "type": "integer",
       "minimum": 1
+    },
+    "coverage_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "dcrit_bps": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "dormant_penalty_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "key_penalty_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
     },
     "feature_history_commitment": {
       "type": "string",
@@ -73,6 +97,7 @@
         "stable",
         "minor",
         "moderate",
+        "high",
         "severe",
         "dormant_reactivation",
         "insufficient_baseline"

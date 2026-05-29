@@ -53,7 +53,7 @@ components:
                 - TSL_SCHEMA_INVALID
                 - TSL_SIGNATURE_INVALID
                 - TSL_CHECKPOINT_INVALID
-                - TSL_DISCLOSURE_CONSENT_MISSING
+                - TSL_DISCLOSURE_CONSENT_REQUIRED
                 - TSL_GRAPH_ARTIFACTS_INVALID
                 - TSL_DELEGATION_SCOPE_VIOLATION
             message:

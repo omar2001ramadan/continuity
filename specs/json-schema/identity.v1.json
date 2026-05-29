@@ -21,7 +21,8 @@
           "public_key": { "type": "string" },
           "status": { "enum": ["active", "revoked", "expired"] },
           "created_at": { "type": "string", "format": "date-time" },
-          "expires_at": { "type": "string", "format": "date-time" }
+          "expires_at": { "type": "string", "format": "date-time" },
+          "revoked_at": { "type": "string", "format": "date-time" }
         }
       }
     },

@@ -20,12 +20,23 @@ import { verifyInclusion } from "./merkle";
 import { verifyNonMembershipProof } from "./nonMembership";
 import { checkpointHash, legacyCheckpointHashV0 } from "./relayStore";
 import type { SettlementBackend } from "./settlement";
-import type { BatchCheckpointV1, Hex32, SeedGovernanceProfileV1, TrustResolver, VerificationChecks, VerificationResult, VerifierPolicy, VerifyTSLInput } from "./types";
+import type {
+  BatchCheckpointV1,
+  Hex32,
+  ProofBundleV1,
+  SeedGovernanceProfileV1,
+  TrustResolver,
+  VerificationChecks,
+  VerificationResult,
+  VerifierPolicy,
+  VerifyTSLInput
+} from "./types";
 import { validateSchema } from "./validation";
 import { verifyThresholdProofAsync } from "./zk";
 import {
-  agentActionV2Hash,
-  computeDriftReportV0,
+	  agentActionV2Hash,
+	  attestationV2Hash,
+	  computeDriftReportV0,
   computeGraphFeatureVectorV0,
   computeSybilAssessmentV0,
   constructGraphFromEvidenceV0,
@@ -63,6 +74,132 @@ const defaultChecks = (): VerificationChecks => ({
   checkpoint_settled: false
 });
 
+const STRICT_POLICY_DEFAULTS: VerifierPolicy = {
+  require_disclosure_consent_for_private_fields: true,
+  reject_dev_zk_circuits: true,
+  reject_unsafe_fixtures_on_mainnet: true,
+  require_four_root_checkpoint: true,
+  require_exact_graph_formulas: true,
+  require_behavioral_sybil_tiers: true,
+  require_core_drift_formula: true,
+  require_profile_signed_scoring: true
+};
+
+function sameCanonical(left: unknown, right: unknown): boolean {
+  if (left === undefined || right === undefined) return true;
+  try {
+    return Buffer.from(canonicalBytes(left)).equals(Buffer.from(canonicalBytes(right)));
+  } catch {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+}
+
+function expandProofBundleInput(input: VerifyTSLInput): { input: VerifyTSLInput; errors: string[] } {
+  const bundle = input.proof_bundle;
+  if (!bundle) return { input, errors: [] };
+  const errors: string[] = [];
+  const conflictFields: Array<keyof ProofBundleV1 & keyof VerifyTSLInput> = [
+    "envelope",
+    "proof",
+	    "checkpoint",
+	    "receipts",
+	    "attestations",
+	    "attestations_v2",
+	    "receipt_disputes",
+	    "revocations",
+	    "settlement_evidence",
+	    "assessment",
+    "assessment_v2",
+    "scoring_profile",
+    "domain_policy",
+    "evidence_coverage",
+    "metadata_fingerprints",
+    "graph_profile",
+    "graph_feature_vector",
+    "trusted_seeds",
+    "adversarial_seeds",
+    "trusted_seed_governance",
+    "adversarial_seed_governance",
+    "event_receivers",
+    "sybil_assessment",
+    "sybil_profile",
+    "drift_report",
+    "drift_feature_history",
+    "drift_cohort_baseline_components",
+    "zk_proofs",
+    "zk_circuit_manifests",
+    "zk_verification_key_registry",
+    "delegations",
+    "delegation_policies",
+    "agent_actions",
+    "audit_findings",
+    "consistency_proofs",
+    "non_membership_proofs",
+    "governance_policy",
+    "message_disclosure",
+    "disclosure_consents"
+  ];
+  for (const field of conflictFields) {
+    if (input[field] !== undefined && bundle[field] !== undefined && !sameCanonical(input[field], bundle[field])) {
+      errors.push("TSL_PROOF_BUNDLE_FIELD_CONFLICT");
+    }
+  }
+  const bundleInput = Object.fromEntries(
+    Object.entries(bundle).filter(([, value]) => value !== null)
+  ) as Partial<VerifyTSLInput>;
+  return {
+    input: {
+      ...bundleInput,
+      ...input,
+      proof_bundle: bundle,
+      envelope: input.envelope ?? bundle.envelope,
+      proof: input.proof ?? bundle.proof,
+      checkpoint: input.checkpoint ?? bundle.checkpoint,
+      redaction_manifest: input.redaction_manifest ?? bundle.redaction_manifest
+    },
+    errors
+  };
+}
+
+function actualRedactionState(input: VerifyTSLInput): ProofBundleV1["redaction_manifest"] {
+  const rawContent = input.message_disclosure?.raw_message !== undefined;
+  const contentSalt = input.message_disclosure?.content_salt !== undefined;
+  const exactCounterparties = Boolean(input.receipts?.length);
+  const restrictedAttestations = Boolean(
+    input.attestations?.some((attestation) => attestation.visibility !== "public") ||
+      input.attestations_v2?.some((attestation) => attestation.visibility !== "public")
+  );
+  const redacted = new Set<string>(input.redaction_manifest?.metadata_fields_redacted ?? []);
+  if (!rawContent) redacted.add("raw_content");
+  if (!contentSalt) redacted.add("content_salt");
+  if (!exactCounterparties) redacted.add("exact_counterparties");
+  if (!restrictedAttestations) redacted.add("restricted_attestations");
+  return {
+    raw_content_included: rawContent || contentSalt,
+    exact_counterparties_included: exactCounterparties,
+    metadata_fields_redacted: [...redacted].sort()
+  };
+}
+
+function redactionManifestMatches(input: VerifyTSLInput): boolean {
+  if (!input.redaction_manifest) {
+    return !(
+      input.proof_bundle ||
+      input.receipts?.length ||
+      input.message_disclosure ||
+      input.attestations?.some((attestation) => attestation.visibility !== "public") ||
+      input.attestations_v2?.some((attestation) => attestation.visibility !== "public")
+    );
+  }
+  const actual = actualRedactionState(input);
+  if (input.redaction_manifest.raw_content_included !== actual.raw_content_included) return false;
+  if (input.redaction_manifest.exact_counterparties_included !== actual.exact_counterparties_included) return false;
+  const declared = new Set(input.redaction_manifest.metadata_fields_redacted);
+  if (!actual.raw_content_included && (!declared.has("raw_content") || !declared.has("content_salt"))) return false;
+  if (!actual.exact_counterparties_included && !declared.has("exact_counterparties")) return false;
+  return true;
+}
+
 function checkpointRootForKind(checkpoint: BatchCheckpointV1, kind: string): string | undefined {
   if (kind === "event") return checkpoint.event_root;
   if (kind === "receipt") return checkpoint.receipt_root;
@@ -85,7 +222,7 @@ async function disclosureConsentAllows(input: VerifyTSLInput, fieldClasses: stri
     const forbidden = new Set(consent.forbidden_field_classes);
     if (!fieldClasses.every((fieldClass) => allowed.has(fieldClass) && !forbidden.has(fieldClass))) continue;
     const identity = await resolver.resolveTrustID(consent.subject, consent.issued_at);
-    const consentKey = identity?.verification_methods.find((method) => keyActiveAt(method, consent.issued_at) && notRevokedAt(method));
+    const consentKey = identity?.verification_methods.find((method) => keyActiveAt(method, consent.issued_at) && notRevokedAt(method, consent.issued_at));
     if (consentKey?.type === "ed25519" && verifyEd25519(consentKey.public_key, disclosureConsentV1Hash(consent), consent.signature)) {
       return true;
     }
@@ -116,7 +253,7 @@ async function seedGovernanceProfileValid(input: {
   if (input.expectedGovernanceCommitment && input.expectedGovernanceCommitment !== seedGovernanceProfileHash(profile)) return false;
   if (!profile.signature) return false;
   const issuerIdentity = await input.resolver.resolveTrustID(profile.issuer, profile.reviewed_at);
-  const issuerKey = issuerIdentity?.verification_methods.find((method) => keyActiveAt(method, profile.reviewed_at) && notRevokedAt(method));
+  const issuerKey = issuerIdentity?.verification_methods.find((method) => keyActiveAt(method, profile.reviewed_at) && notRevokedAt(method, profile.reviewed_at));
   return issuerKey?.type === "ed25519" && verifyEd25519(issuerKey.public_key, seedGovernanceProfileHash(profile), profile.signature);
 }
 
@@ -126,8 +263,11 @@ export async function verifyTSL(
   policy: VerifierPolicy = {},
   settlementBackend?: SettlementBackend
 ): Promise<VerificationResult> {
+  policy = { ...STRICT_POLICY_DEFAULTS, ...policy };
+  const expanded = expandProofBundleInput(input);
+  input = expanded.input;
   const checks = defaultChecks();
-  const errors: string[] = [];
+  const errors: string[] = [...expanded.errors];
   const explanation: string[] = [];
   let settlementStatus: VerificationResult["settlement_status"] = policy.require_settlement ? "pending" : "not_required";
   let riskLabel: VerificationResult["risk_label"] = "not_assessed";
@@ -136,6 +276,8 @@ export async function verifyTSL(
       if (process.env[flag] === "true") errors.push("TSL_UNSAFE_FIXTURE_POLICY_ENABLED");
     }
   }
+  checks.redaction_manifest_valid = redactionManifestMatches(input);
+  if (!checks.redaction_manifest_valid) errors.push("TSL_REDACTION_MANIFEST_INVALID");
 
   const eventValidation = validateSchema("event", input.envelope);
   checks.schema_valid = eventValidation.valid;
@@ -161,7 +303,7 @@ export async function verifyTSL(
   const key = findVerificationMethod(identity, input.envelope.signing_key_id);
   checks.key_found = key !== null;
   checks.key_active = keyActiveAt(key, input.envelope.timestamp);
-  checks.not_revoked = notRevokedAt(key);
+  checks.not_revoked = notRevokedAt(key, input.envelope.timestamp);
 
   if (key?.type === "ed25519") {
     checks.signature_valid = verifyEd25519(key.public_key, unsignedEventHash, input.envelope.signature);
@@ -224,12 +366,18 @@ export async function verifyTSL(
     if (checks.revocation_state_valid) explanation.push("Signed revocation state is valid");
   }
 
-  if (input.message_disclosure?.raw_message !== undefined && input.message_disclosure.content_salt) {
-    checks.disclosure_consent_valid = await disclosureConsentAllows(input, ["raw_content", "content_salt"], resolver, policy);
+  if (input.message_disclosure?.raw_message !== undefined || input.message_disclosure?.content_salt !== undefined) {
+    const fieldClasses = [
+      ...(input.message_disclosure.raw_message !== undefined ? ["raw_content"] : []),
+      ...(input.message_disclosure.content_salt !== undefined ? ["content_salt"] : [])
+    ];
+    checks.disclosure_consent_valid = policy.require_disclosure_consent_for_private_fields === false ? true : await disclosureConsentAllows(input, fieldClasses, resolver, policy);
     if (!checks.disclosure_consent_valid) {
-      errors.push("TSL_DISCLOSURE_CONSENT_MISSING");
+      errors.push("TSL_DISCLOSURE_CONSENT_REQUIRED");
     }
     checks.content_commitment_matches =
+      input.message_disclosure.raw_message !== undefined &&
+      input.message_disclosure.content_salt !== undefined &&
       checks.disclosure_consent_valid &&
       contentCommitment(input.message_disclosure.raw_message, input.message_disclosure.content_salt) === input.envelope.content_commitment;
     if (checks.content_commitment_matches) {
@@ -255,12 +403,12 @@ export async function verifyTSL(
 
   if (input.receipts?.length) {
     checks.receipt_valid = true;
-    if (policy.require_receipt_inclusion_for_disclosed_receipts) {
+    if (policy.require_disclosure_consent_for_private_fields !== false) {
       const consent = await disclosureConsentAllows(input, ["exact_counterparties"], resolver, policy);
       checks.disclosure_consent_valid = checks.disclosure_consent_valid !== false && consent;
       if (!consent) {
         checks.receipt_valid = false;
-        errors.push("TSL_DISCLOSURE_CONSENT_MISSING");
+        errors.push("TSL_DISCLOSURE_CONSENT_REQUIRED");
       }
     }
     for (const receipt of input.receipts) {
@@ -281,7 +429,7 @@ export async function verifyTSL(
         checks.receipt_valid = false;
         errors.push("TSL_RECEIPT_INVALID");
       }
-      if (policy.require_receipt_inclusion_for_disclosed_receipts) {
+      if (policy.require_receipt_inclusion_for_disclosed_receipts || policy.require_disclosure_consent_for_private_fields !== false) {
         const receiptCommitment = receiptHash(receipt);
         const receiptProof = input.receipt_proofs?.find((proof) => proof.commitment === receiptCommitment);
         const receiptProofValid =
@@ -308,12 +456,12 @@ export async function verifyTSL(
 
   if (input.attestations?.length) {
     checks.attestation_valid = true;
-    if (policy.require_receipt_inclusion_for_disclosed_receipts && input.attestations.some((attestation) => attestation.visibility !== "public")) {
+    if (policy.require_disclosure_consent_for_private_fields !== false && input.attestations.some((attestation) => attestation.visibility !== "public")) {
       const consent = await disclosureConsentAllows(input, ["attestations"], resolver, policy);
       checks.disclosure_consent_valid = checks.disclosure_consent_valid !== false && consent;
       if (!consent) {
         checks.attestation_valid = false;
-        errors.push("TSL_DISCLOSURE_CONSENT_MISSING");
+        errors.push("TSL_DISCLOSURE_CONSENT_REQUIRED");
       }
     }
     for (const attestation of input.attestations) {
@@ -335,6 +483,37 @@ export async function verifyTSL(
       }
     }
     if (checks.attestation_valid) explanation.push("Attestation signatures valid");
+  }
+
+  if (input.attestations_v2?.length) {
+    checks.attestation_valid = checks.attestation_valid !== false;
+    if (policy.require_disclosure_consent_for_private_fields !== false && input.attestations_v2.some((attestation) => attestation.visibility !== "public")) {
+      const consent = await disclosureConsentAllows(input, ["attestations"], resolver, policy);
+      checks.disclosure_consent_valid = checks.disclosure_consent_valid !== false && consent;
+      if (!consent) {
+        checks.attestation_valid = false;
+        errors.push("TSL_DISCLOSURE_CONSENT_REQUIRED");
+      }
+    }
+    for (const attestation of input.attestations_v2) {
+      const validation = validateSchema("attestationV2", attestation);
+      if (!validation.valid) {
+        checks.attestation_valid = false;
+        errors.push("TSL_ATTESTATION_INVALID", ...validation.errors);
+        continue;
+      }
+      const issuerIdentity = await resolver.resolveTrustID(attestation.issuer, attestation.issued_at);
+      const issuerKey = issuerIdentity?.verification_methods.find((method) => keyActiveAt(method, attestation.issued_at));
+      const valid =
+        attestation.subject === input.envelope.sender &&
+        issuerKey?.type === "ed25519" &&
+        verifyEd25519(issuerKey.public_key, attestationV2Hash(attestation), attestation.signature);
+      if (!valid) {
+        checks.attestation_valid = false;
+        errors.push("TSL_ATTESTATION_INVALID");
+      }
+    }
+    if (checks.attestation_valid) explanation.push("v2 attestation signatures valid");
   }
 
   if (input.assessment) {
@@ -589,28 +768,37 @@ export async function verifyTSL(
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.sybil_assessment_valid;
     }
     if (input.drift_report) {
-      const subjectIdentity = await resolver.resolveTrustID(input.drift_report.subject, input.drift_report.computed_at);
-      const subjectKey = subjectIdentity?.verification_methods.find((method) => keyActiveAt(method, input.drift_report!.computed_at));
+      const issuerOrSubject = input.drift_report.issuer ?? input.drift_report.subject;
+      const issuerIdentity = await resolver.resolveTrustID(issuerOrSubject, input.drift_report.computed_at);
+      const issuerKey = issuerIdentity?.verification_methods.find((method) => keyActiveAt(method, input.drift_report!.computed_at));
       checks.drift_report_valid = Boolean(
         input.drift_report.subject === input.envelope.sender &&
-          subjectKey?.type === "ed25519" &&
-          verifyEd25519(subjectKey.public_key, driftReportV1Hash(input.drift_report), input.drift_report.signature)
+          issuerKey?.type === "ed25519" &&
+          verifyEd25519(issuerKey.public_key, driftReportV1Hash(input.drift_report), input.drift_report.signature)
       );
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.drift_report_valid;
     }
     let evidenceGraph: GraphV0 | undefined;
-    if (input.graph_profile && (input.graph_feature_vector || input.sybil_assessment)) {
-      evidenceGraph = await constructGraphFromEvidenceV0({
-        events: [input.envelope],
-        receipts: input.receipts,
-        attestations: input.attestations,
-        delegation_policies: input.delegation_policies,
-        resolver,
-        graph_profile: input.graph_profile,
-        at_time: input.graph_feature_vector?.computed_at ?? input.sybil_assessment?.computed_at ?? input.envelope.timestamp,
-        event_receivers: input.event_receivers
-      });
-    }
+	    if (input.graph_profile && (input.graph_feature_vector || input.sybil_assessment)) {
+	      try {
+	        evidenceGraph = await constructGraphFromEvidenceV0({
+	          events: [input.envelope],
+	          receipts: input.receipts,
+	          attestations: input.attestations,
+	          attestations_v2: input.attestations_v2,
+	          receipt_disputes: input.receipt_disputes,
+	          delegation_policies: input.delegation_policies,
+	          resolver,
+	          graph_profile: input.graph_profile,
+	          at_time: input.graph_feature_vector?.computed_at ?? input.sybil_assessment?.computed_at ?? input.envelope.timestamp,
+	          event_receivers: input.event_receivers,
+	          strict_negative_evidence: true
+	        });
+	      } catch (error) {
+	        checks.graph_artifacts_valid = false;
+	        errors.push(error instanceof Error && error.message === "TSL_NEGATIVE_EVIDENCE_INCOMPLETE" ? "TSL_NEGATIVE_EVIDENCE_INCOMPLETE" : "TSL_GRAPH_EVIDENCE_INVALID");
+	      }
+	    }
     if (input.graph_profile && input.graph_feature_vector && evidenceGraph) {
       const recomputed = computeGraphFeatureVectorV0({
         subject: input.graph_feature_vector.subject,
@@ -638,11 +826,13 @@ export async function verifyTSL(
         recomputed.adversarial_seed_distance_bps === input.graph_feature_vector.adversarial_seed_distance_bps &&
         recomputed.pagerank_bps === input.graph_feature_vector.pagerank_bps &&
         recomputed.ppr_lite_bps === input.graph_feature_vector.ppr_lite_bps &&
-        recomputed.modularity_bps === input.graph_feature_vector.modularity_bps &&
-        recomputed.community_pass_count === input.graph_feature_vector.community_pass_count;
-      const graphCommitmentsMatch =
-        recomputed.recomputation_commitment === input.graph_feature_vector.recomputation_commitment &&
-        recomputed.privacy_disclosure_level === input.graph_feature_vector.privacy_disclosure_level;
+	        recomputed.modularity_bps === input.graph_feature_vector.modularity_bps &&
+	        recomputed.community_pass_count === input.graph_feature_vector.community_pass_count &&
+	        recomputed.cluster_concentration_bps === input.graph_feature_vector.cluster_concentration_bps;
+	      const graphCommitmentsMatch =
+	        recomputed.recomputation_commitment === input.graph_feature_vector.recomputation_commitment &&
+	        recomputed.feature_commitment === input.graph_feature_vector.feature_commitment &&
+	        recomputed.privacy_disclosure_level === input.graph_feature_vector.privacy_disclosure_level;
       const fullGraphMatches = graphMatches && graphCommitmentsMatch;
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && fullGraphMatches;
       if (!fullGraphMatches) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
@@ -672,12 +862,16 @@ export async function verifyTSL(
           recomputedSybil.external_diversity_bps === input.sybil_assessment.external_diversity_bps &&
           recomputedSybil.seed_contamination_bps === input.sybil_assessment.seed_contamination_bps &&
           recomputedSybil.receipt_symmetry_bps === input.sybil_assessment.receipt_symmetry_bps &&
-          recomputedSybil.attack_cost_minor_units === input.sybil_assessment.attack_cost_minor_units &&
-          JSON.stringify(recomputedSybil.cost_components) === JSON.stringify(input.sybil_assessment.cost_components) &&
-          recomputedSybil.expected_benefit_minor_units === input.sybil_assessment.expected_benefit_minor_units &&
-          recomputedSybil.attack_scenario === input.sybil_assessment.attack_scenario &&
-          recomputedSybil.risk_score_bps === input.sybil_assessment.risk_score_bps &&
-          recomputedSybil.risk_label === input.sybil_assessment.risk_label;
+	          recomputedSybil.attack_cost_minor_units === input.sybil_assessment.attack_cost_minor_units &&
+	          JSON.stringify(recomputedSybil.cost_components) === JSON.stringify(input.sybil_assessment.cost_components) &&
+	          recomputedSybil.expected_benefit_minor_units === input.sybil_assessment.expected_benefit_minor_units &&
+	          recomputedSybil.attack_scenario === input.sybil_assessment.attack_scenario &&
+	          JSON.stringify(recomputedSybil.compromise_signals ?? {}) === JSON.stringify(input.sybil_assessment.compromise_signals ?? {}) &&
+	          JSON.stringify(recomputedSybil.issuer_collusion_signals ?? {}) === JSON.stringify(input.sybil_assessment.issuer_collusion_signals ?? {}) &&
+	          JSON.stringify(recomputedSybil.infrastructure_collusion_signals ?? {}) === JSON.stringify(input.sybil_assessment.infrastructure_collusion_signals ?? {}) &&
+	          JSON.stringify(recomputedSybil.scenario_evidence_checks ?? []) === JSON.stringify(input.sybil_assessment.scenario_evidence_checks ?? []) &&
+	          recomputedSybil.risk_score_bps === input.sybil_assessment.risk_score_bps &&
+	          recomputedSybil.risk_label === input.sybil_assessment.risk_label;
         checks.graph_artifacts_valid = checks.graph_artifacts_valid && sybilMatches;
         if (!sybilMatches) errors.push("TSL_SYBIL_ARTIFACT_INVALID");
     }
@@ -689,6 +883,11 @@ export async function verifyTSL(
           baseline_window_days: input.drift_report.baseline_window_days,
           observation_window_days: input.drift_report.observation_window_days,
           computed_at: input.drift_report.computed_at,
+          issuer: input.drift_report.issuer,
+          coverage_bps: input.drift_report.coverage_bps,
+          dcrit_bps: input.drift_report.dcrit_bps,
+          dormant_penalty_bps: input.drift_report.dormant_penalty_bps,
+          key_penalty_bps: input.drift_report.key_penalty_bps,
           last_verified_event_at: input.drift_report.last_verified_event_at,
           cohort_baseline_components: input.drift_cohort_baseline_components
         });
@@ -703,7 +902,12 @@ export async function verifyTSL(
           recomputedDrift.recomputation_status === input.drift_report.recomputation_status &&
           recomputedDrift.last_verified_event_at === input.drift_report.last_verified_event_at &&
           recomputedDrift.days_since_last_verified_event === input.drift_report.days_since_last_verified_event &&
-          JSON.stringify(recomputedDrift.component_scores_bps ?? {}) === JSON.stringify(input.drift_report.component_scores_bps ?? {});
+          recomputedDrift.coverage_bps === input.drift_report.coverage_bps &&
+          recomputedDrift.dcrit_bps === input.drift_report.dcrit_bps &&
+          recomputedDrift.dormant_penalty_bps === input.drift_report.dormant_penalty_bps &&
+          recomputedDrift.key_penalty_bps === input.drift_report.key_penalty_bps &&
+          JSON.stringify(recomputedDrift.component_scores_bps ?? {}) === JSON.stringify(input.drift_report.component_scores_bps ?? {}) &&
+          JSON.stringify(recomputedDrift.reason_codes) === JSON.stringify(input.drift_report.reason_codes);
         checks.graph_artifacts_valid = checks.graph_artifacts_valid && driftMatches;
         if (!driftMatches) errors.push("TSL_DRIFT_ARTIFACT_INVALID");
       }
@@ -1014,6 +1218,7 @@ export async function verifyTSL(
     checks.content_commitment_matches !== false &&
     checks.disclosure_consent_valid !== false &&
     checks.checkpoint_signature_valid !== false &&
+    checks.redaction_manifest_valid !== false &&
     checks.receipt_valid !== false &&
     checks.attestation_valid !== false &&
     checks.revocation_state_valid !== false &&

@@ -78,11 +78,12 @@ export function createSignedMessageProof(input: {
 	      metadata_fields_redacted: mayDiscloseMessage ? ["platform", "ip_address", "user_agent"] : ["raw_content", "content_salt", "platform", "ip_address", "user_agent"]
 	    },
 	    local_disclosure_warnings: ["local_unsigned_fixture_checkpoint"],
-	    ...(mayDiscloseMessage
-	      ? {
-	          message_disclosure: {
-	            raw_message: input.message,
-	            content_salt: signed.content_salt
+		    ...(mayDiscloseMessage
+		      ? {
+		          disclosure_consents: input.disclosure_consent ? [input.disclosure_consent] : undefined,
+		          message_disclosure: {
+		            raw_message: input.message,
+		            content_salt: signed.content_salt
 	          }
 	        }
 	      : {})

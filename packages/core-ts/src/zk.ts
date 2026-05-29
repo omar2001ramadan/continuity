@@ -193,6 +193,10 @@ function manifestForProof(input: {
   });
 }
 
+function isDevCircuitId(circuitId?: string): boolean {
+  return !circuitId || circuitId.startsWith("dev_") || circuitId.includes(":dev") || circuitId.includes("fixture") || circuitId.includes("prototype");
+}
+
 export function zkProofUsesRegisteredCircuit(input: {
   proof: ZkThresholdProofV1;
   manifests?: ZkCircuitReleaseManifestV1[];
@@ -236,13 +240,15 @@ export async function verifyThresholdProofAsync(
       if (process.env[flag] === "true") return false;
     }
   }
-  if (!proof.groth16) return process.env.ALLOW_UNSAFE_ZK_HASH_FIXTURES === "true" && !(options.reject_dev_circuits && process.env.TSL_NETWORK === "mainnet");
-  if (!proof.groth16.verification_key) return false;
-  const signals = proof.groth16.public_signals.map(String);
+	  if (!proof.groth16) return process.env.ALLOW_UNSAFE_ZK_HASH_FIXTURES === "true" && !(options.reject_dev_circuits && process.env.TSL_NETWORK === "mainnet");
+	  if (!proof.groth16.verification_key) return false;
+	  if (options.reject_dev_circuits && isDevCircuitId(proof.circuit_id)) return false;
+	  const signals = proof.groth16.public_signals.map(String);
   if (proof.public_signal_commitment && proof.public_signal_commitment !== publicSignalCommitment(signals)) return false;
-  const manifest = manifestForProof({ proof, manifests: options.manifests });
-  if (options.require_registered_circuit && !zkProofUsesRegisteredCircuit({ proof, manifests: options.manifests, registry: options.registry })) return false;
-  if (options.reject_dev_circuits && manifest?.status !== "active") return false;
+	  const manifest = manifestForProof({ proof, manifests: options.manifests });
+	  const productionCircuitRequired = Boolean(options.require_registered_circuit || options.reject_dev_circuits);
+	  if (productionCircuitRequired && !zkProofUsesRegisteredCircuit({ proof, manifests: options.manifests, registry: options.registry })) return false;
+	  if (options.reject_dev_circuits && manifest?.status !== "active") return false;
   const requireManifestKeyHash = Boolean(options.require_manifest_verification_key_hash || options.require_registered_circuit || options.reject_dev_circuits);
   if (requireManifestKeyHash && !manifest?.verification_key) return false;
   const verificationKey = manifest?.verification_key ?? proof.groth16.verification_key;

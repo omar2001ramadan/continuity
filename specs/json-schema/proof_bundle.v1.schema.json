@@ -48,7 +48,25 @@
         "type": "object"
       }
     },
+    "attestations_v2": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "receipt_disputes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
     "revocations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "settlement_evidence": {
       "type": "array",
       "items": {
         "type": "object"
@@ -65,6 +83,51 @@
         "object",
         "null"
       ]
+    },
+    "scoring_profile": {
+      "type": "object"
+    },
+    "domain_policy": {
+      "type": "object"
+    },
+    "evidence_coverage": {
+      "type": "object"
+    },
+    "feature_registry": {
+      "type": "object"
+    },
+    "normalization_profile": {
+      "type": "object"
+    },
+    "weight_profile": {
+      "type": "object"
+    },
+    "calibration_profile": {
+      "type": "object"
+    },
+    "confidence_profile": {
+      "type": "object"
+    },
+    "provider_governance_status": {
+      "type": "object"
+    },
+    "metadata_fingerprints": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "graph_profile": {
+      "type": "object"
+    },
+    "graph_feature_vector": {
+      "type": "object"
+    },
+    "sybil_assessment": {
+      "type": "object"
+    },
+    "drift_report": {
+      "type": "object"
     },
     "zk_proofs": {
       "type": "array",
@@ -158,7 +221,22 @@
         "type": "object"
       }
     },
+    "consistency_proofs": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "non_membership_proofs": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
     "governance_policy": {
+      "type": "object"
+    },
+    "appeal_metadata": {
       "type": "object"
     },
     "redaction_manifest": {

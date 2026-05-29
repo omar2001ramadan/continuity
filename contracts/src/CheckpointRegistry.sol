@@ -21,6 +21,7 @@ contract CheckpointRegistry {
         uint64 receiptCount;
         bytes32 previousCheckpoint;
         bytes32 relayId;
+        bytes32 settlementBackend;
     }
 
     struct Checkpoint {
@@ -35,6 +36,7 @@ contract CheckpointRegistry {
         uint64 receiptCount;
         bytes32 previousCheckpoint;
         bytes32 relayId;
+        bytes32 settlementBackend;
         uint64 submittedAt;
     }
 
@@ -119,6 +121,7 @@ contract CheckpointRegistry {
             receiptCount: input.receiptCount,
             previousCheckpoint: input.previousCheckpoint,
             relayId: input.relayId,
+            settlementBackend: input.settlementBackend,
             submittedAt: uint64(block.timestamp)
         });
         checkpointHashByEpochShard[key] = checkpointHash;
@@ -156,7 +159,8 @@ contract CheckpointRegistry {
                 input.eventCount,
                 input.receiptCount,
                 input.previousCheckpoint,
-                input.relayId
+                input.relayId,
+                input.settlementBackend
             )
         );
     }

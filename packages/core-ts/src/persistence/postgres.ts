@@ -95,7 +95,7 @@ export class PostgresRepository {
     const identity = (result.rows[0]?.identity_document as IdentityDocumentV1 | undefined) ?? null;
     if (!identity) return null;
     const keys = await this.pool.query(
-      "SELECT key_id, key_type, public_key, status, created_at, expires_at FROM verification_keys WHERE trust_id = $1 ORDER BY key_id",
+      "SELECT key_id, key_type, public_key, status, created_at, expires_at, revoked_at FROM verification_keys WHERE trust_id = $1 ORDER BY key_id",
       [trustId]
     );
     if (keys.rows.length === 0) return identity;
@@ -107,7 +107,8 @@ export class PostgresRepository {
         public_key: row.public_key,
         status: row.status,
         created_at: new Date(row.created_at).toISOString(),
-        ...(row.expires_at ? { expires_at: new Date(row.expires_at).toISOString() } : {})
+        ...(row.expires_at ? { expires_at: new Date(row.expires_at).toISOString() } : {}),
+        ...(row.revoked_at ? { revoked_at: new Date(row.revoked_at).toISOString() } : {})
       }))
     };
   }
@@ -118,13 +119,17 @@ export class PostgresRepository {
     return body ? (JSON.parse(Buffer.from(body).toString("utf8")) as EventCommitmentV1) : null;
   }
 
-  async insertEvent(event: EventCommitmentV1, relayId: string, epochStartMs: number, epochDurationMs: number): Promise<Hex32> {
-    const hash = commitmentHash(event);
-    const shard = shardForTrustID(event.sender);
+  private async assertSegmentOpen(epochStartMs: number, shard: string): Promise<void> {
     const closed = await this.pool.query("SELECT checkpoint_hash FROM checkpoints WHERE epoch_start_ms = $1 AND shard = $2 LIMIT 1", [epochStartMs, shard]);
     if (closed.rows.length > 0) {
       throw new Error("TSL_LOG_SEGMENT_CLOSED");
     }
+  }
+
+  async insertEvent(event: EventCommitmentV1, relayId: string, epochStartMs: number, epochDurationMs: number): Promise<Hex32> {
+    const hash = commitmentHash(event);
+    const shard = shardForTrustID(event.sender);
+    await this.assertSegmentOpen(epochStartMs, shard);
     await this.pool.query(
       `INSERT INTO event_commitments(
         commitment_hash, sender_trust_id, signing_key_id, event_class, content_commitment,
@@ -156,6 +161,7 @@ export class PostgresRepository {
 
   async insertReceipt(receipt: ReceiptCommitmentV1, receiptHash: Hex32, relayId: string, epochStartMs: number): Promise<void> {
     const shard = shardForTrustID(receipt.receiver);
+    await this.assertSegmentOpen(epochStartMs, shard);
     await this.pool.query(
       `INSERT INTO receipt_commitments(
         receipt_hash, event_commitment, receiver_trust_id, signing_key_id, receipt_class,
@@ -182,6 +188,7 @@ export class PostgresRepository {
   async insertAttestation(attestation: AttestationV1, relayId: string, epochStartMs: number): Promise<Hex32> {
     const hash = attestationCommitmentHash(attestation);
     const shard = shardForTrustID(attestation.issuer);
+    await this.assertSegmentOpen(epochStartMs, shard);
     await this.pool.query(
       `INSERT INTO attestations(
         attestation_hash, issuer_trust_id, subject_trust_id, attestation_class, visibility,
@@ -211,6 +218,7 @@ export class PostgresRepository {
     const hash = revocationCommitmentHash(revocation);
     const shard = shardForTrustID(revocation.trust_id);
     const epochStartMs = Math.floor(Date.parse(revocation.effective_at) / epochDurationMs) * epochDurationMs;
+    await this.assertSegmentOpen(epochStartMs, shard);
     await this.pool.query(
       `INSERT INTO revocations(
         revocation_hash, trust_id, key_id, reason_class, effective_at,

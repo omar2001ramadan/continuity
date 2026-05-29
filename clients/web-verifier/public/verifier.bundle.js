@@ -33448,19 +33448,30 @@ function findVerificationMethod(identity, keyId) {
 }
 function keyActiveAt(key, timestamp) {
   if (!key) return false;
-  if (key.status !== "active") return false;
   const at = Date.parse(timestamp);
   const created = Date.parse(key.created_at);
   if (!Number.isFinite(at) || !Number.isFinite(created)) return false;
   if (created > at) return false;
+  if (key.status === "revoked") {
+    if (!key.revoked_at) return false;
+    const revoked = Date.parse(key.revoked_at);
+    if (!Number.isFinite(revoked) || at >= revoked) return false;
+  } else if (key.status !== "active") {
+    return false;
+  }
   if (key.expires_at) {
     const expires = Date.parse(key.expires_at);
     if (!Number.isFinite(expires) || at >= expires) return false;
   }
   return true;
 }
-function notRevokedAt(key) {
-  return key?.status !== "revoked";
+function notRevokedAt(key, timestamp) {
+  if (!key) return false;
+  if (key.status !== "revoked") return true;
+  if (!timestamp || !key.revoked_at) return false;
+  const at = Date.parse(timestamp);
+  const revoked = Date.parse(key.revoked_at);
+  return Number.isFinite(at) && Number.isFinite(revoked) && at < revoked;
 }
 
 // packages/core-ts/src/agent.ts
@@ -33528,7 +33539,8 @@ var identity_v1_schema_default = {
           public_key: { type: "string" },
           status: { enum: ["active", "revoked", "expired"] },
           created_at: { type: "string", format: "date-time" },
-          expires_at: { type: "string", format: "date-time" }
+          expires_at: { type: "string", format: "date-time" },
+          revoked_at: { type: "string", format: "date-time" }
         }
       }
     },
@@ -34125,6 +34137,51 @@ var proof_bundle_v1_schema_default = {
         "null"
       ]
     },
+    scoring_profile: {
+      type: "object"
+    },
+    domain_policy: {
+      type: "object"
+    },
+    evidence_coverage: {
+      type: "object"
+    },
+    feature_registry: {
+      type: "object"
+    },
+    normalization_profile: {
+      type: "object"
+    },
+    weight_profile: {
+      type: "object"
+    },
+    calibration_profile: {
+      type: "object"
+    },
+    confidence_profile: {
+      type: "object"
+    },
+    provider_governance_status: {
+      type: "object"
+    },
+    metadata_fingerprints: {
+      type: "array",
+      items: {
+        type: "object"
+      }
+    },
+    graph_profile: {
+      type: "object"
+    },
+    graph_feature_vector: {
+      type: "object"
+    },
+    sybil_assessment: {
+      type: "object"
+    },
+    drift_report: {
+      type: "object"
+    },
     zk_proofs: {
       type: "array",
       items: {
@@ -34217,7 +34274,22 @@ var proof_bundle_v1_schema_default = {
         type: "object"
       }
     },
+    consistency_proofs: {
+      type: "array",
+      items: {
+        type: "object"
+      }
+    },
+    non_membership_proofs: {
+      type: "array",
+      items: {
+        type: "object"
+      }
+    },
     governance_policy: {
+      type: "object"
+    },
+    appeal_metadata: {
       type: "object"
     },
     redaction_manifest: {
@@ -35030,6 +35102,8 @@ var graph_profile_v2_schema_default = {
         algorithm: {
           enum: [
             "connected_components",
+            "louvain",
+            "leiden",
             "leiden_refinement_v0",
             "louvain_modularity_v0",
             "leiden_refinement_v1",
@@ -35302,6 +35376,15 @@ var graph_feature_vector_v1_schema_default = {
       type: "integer",
       minimum: 0
     },
+    cluster_concentration_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    feature_commitment: {
+      type: "string",
+      pattern: "^0x[0-9a-f]{64}$"
+    },
     recomputation_commitment: {
       type: "string",
       pattern: "^0x[0-9a-f]{64}$"
@@ -35520,6 +35603,10 @@ var drift_report_v1_schema_default = {
       type: "string",
       pattern: "^did:tsl:"
     },
+    issuer: {
+      type: "string",
+      pattern: "^did:tsl:"
+    },
     drift_profile_id: {
       type: "string"
     },
@@ -35534,6 +35621,26 @@ var drift_report_v1_schema_default = {
     observation_window_days: {
       type: "integer",
       minimum: 1
+    },
+    coverage_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    dcrit_bps: {
+      type: "integer",
+      minimum: 1,
+      maximum: 1e4
+    },
+    dormant_penalty_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    key_penalty_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
     },
     feature_history_commitment: {
       type: "string",
@@ -35571,6 +35678,7 @@ var drift_report_v1_schema_default = {
         "stable",
         "minor",
         "moderate",
+        "high",
         "severe",
         "dormant_reactivation",
         "insufficient_baseline"
@@ -36364,6 +36472,10 @@ function validateSchema(name, value) {
 
 // packages/core-ts/src/relayStore.ts
 function checkpointHash(checkpoint) {
+  const payload = withoutField(withoutField(checkpoint, "relay_signature"), "settlement_tx");
+  return hashDomain(DOMAIN_TAGS.CHECKPOINT_V1, new TextEncoder().encode(canonicalize(payload)));
+}
+function legacyCheckpointHashV0(checkpoint) {
   let payload = withoutField(checkpoint, "relay_signature");
   payload = withoutField(payload, "settlement_backend");
   payload = withoutField(payload, "settlement_tx");
@@ -36399,6 +36511,11 @@ function sparseMerkleLeaf(value) {
 }
 function sparseMerkleNode(left, right) {
   return sparseHash("node", { left, right });
+}
+function sparseMerkleIndex(value, depth) {
+  if (!Number.isSafeInteger(depth) || depth < 1 || depth > 30) throw new Error("TSL_SPARSE_MERKLE_DEPTH_INVALID");
+  const digest = BigInt(value);
+  return Number(digest & (1n << BigInt(depth)) - 1n);
 }
 function verifyNonMembershipProof(proof) {
   if (proof.type !== "tsl.zk.non_membership_proof.v1") return false;
@@ -36451,6 +36568,8 @@ function verifySparseMerkleProof(proof, root, profile) {
   if (proof.root && proof.root !== root) return false;
   if (proof.set_root !== root) return false;
   if (proof.leaf_index === void 0 || !proof.sibling_path || proof.sibling_path.length !== profile.tree_depth) return false;
+  const expectedLeafIndex = sparseMerkleIndex(proof.value_commitment, profile.tree_depth);
+  if (proof.leaf_index !== expectedLeafIndex) return false;
   const expectedIndexCommitment = sparseHash("leaf-index", { tree_id: profile.tree_id, index: proof.leaf_index });
   if (proof.leaf_index_commitment !== expectedIndexCommitment) return false;
   const zeroes = sparseMerkleZeroHashes(profile.tree_depth);
@@ -36519,7 +36638,12 @@ function verifyThresholdProof(proof) {
 }
 async function verifyThresholdProofAsync(proof, options = {}) {
   if (!verifyThresholdProof(proof)) return false;
-  if (!proof.groth16) return process.env.ALLOW_UNSAFE_ZK_HASH_FIXTURES === "true";
+  if (options.reject_dev_circuits && process.env.TSL_NETWORK === "mainnet") {
+    for (const flag of ["ALLOW_UNSAFE_ZK_HASH_FIXTURES", "ALLOW_UNSAFE_ZK_SYNTHETIC_RECEIPTS", "ALLOW_UNSAFE_ZK_UNSUPPORTED_CIRCUITS"]) {
+      if (process.env[flag] === "true") return false;
+    }
+  }
+  if (!proof.groth16) return process.env.ALLOW_UNSAFE_ZK_HASH_FIXTURES === "true" && !(options.reject_dev_circuits && process.env.TSL_NETWORK === "mainnet");
   if (!proof.groth16.verification_key) return false;
   const signals = proof.groth16.public_signals.map(String);
   if (proof.public_signal_commitment && proof.public_signal_commitment !== publicSignalCommitment(signals)) return false;
@@ -36575,8 +36699,8 @@ function trustAssessmentV2Hash(assessment) {
 function disclosureConsentV1Hash(consent) {
   return hashSignedObject(V2_DOMAIN_TAGS.DISCLOSURE_CONSENT_V1, consent);
 }
-function constructGraphFromRawEdgesForTestV0(input) {
-  const edges = [...input.edges].sort((a, b2) => a.timestamp.localeCompare(b2.timestamp) || canonicalBytes(a).join(",").localeCompare(canonicalBytes(b2).join(",")));
+function graphFromVerifiedEdgesV0(edgesInput) {
+  const edges = [...edgesInput].sort((a, b2) => a.timestamp.localeCompare(b2.timestamp) || canonicalBytes(a).join(",").localeCompare(canonicalBytes(b2).join(",")));
   const nodes = [...new Set(edges.flatMap((edge) => [edge.src, edge.dst]))].sort();
   return { edges, nodes };
 }
@@ -36595,11 +36719,27 @@ function graphBaseWeightBps(profile, edgeType) {
 }
 function graphDecayBps(profile, edgeType, timestamp, atTime) {
   const decay = profile;
-  const halfLifeDays = decay.half_life_days?.[edgeType];
+  const defaultDecayProfile = profile.temporal_decay_profile === "default_decay_v2" || profile.temporal_decay_profile === "half-life-180d" ? {
+    signed_event: 90,
+    received: 180,
+    replied: 180,
+    transacted: 365,
+    completed: 365,
+    disputed: 30,
+    attestation: 180,
+    delegation: 365,
+    code_release: 365
+  } : {};
+  const halfLifeDays = decay.half_life_days?.[edgeType] ?? decay.half_life_days?.attestation ?? defaultDecayProfile[edgeType];
   if (!halfLifeDays || halfLifeDays <= 0) return 1e4;
   const ageMs = Math.max(0, Date.parse(atTime) - Date.parse(timestamp));
   const ageDays = ageMs / 864e5;
   return clampBps(Math.floor(1e4 * 2 ** (-ageDays / halfLifeDays)));
+}
+function normalizeCommunityAlgorithm(algorithm) {
+  if (algorithm === "louvain") return "louvain_modularity_v1";
+  if (algorithm === "leiden") return "leiden_refinement_v1";
+  return algorithm;
 }
 function issuerQualityBps(profile, issuer) {
   const quality = profile;
@@ -36608,7 +36748,7 @@ function issuerQualityBps(profile, issuer) {
 async function identityHasValidSignature(input) {
   const document = await input.resolver.resolveTrustID(input.identity, input.timestamp);
   const key = document ? findVerificationMethod(document, input.signing_key_id) : null;
-  return key?.type === "ed25519" && keyActiveAt(key, input.timestamp) && notRevokedAt(key) && verifyEd25519(key.public_key, input.hash, input.signature);
+  return key?.type === "ed25519" && keyActiveAt(key, input.timestamp) && notRevokedAt(key, input.timestamp) && verifyEd25519(key.public_key, input.hash, input.signature);
 }
 async function constructGraphFromEvidenceV0(input) {
   const edges = [];
@@ -36647,15 +36787,17 @@ async function constructGraphFromEvidenceV0(input) {
     });
     const sender = eventSenderByCommitment.get(receipt.event_commitment);
     if (!valid || !sender) continue;
-    edges.push({
+    const edge = {
       src: receipt.receiver,
       dst: sender,
       type: receipt.receipt_class,
       timestamp: receipt.timestamp,
       weight_bps: graphBaseWeightBps(input.graph_profile, receipt.receipt_class),
       decay_bps: graphDecayBps(input.graph_profile, receipt.receipt_class, receipt.timestamp, input.at_time),
-      receipt_status_bps: receipt.receipt_class === "disputed" ? 5e3 : 1e4
-    });
+      receipt_status_bps: receipt.receipt_class === "disputed" ? 5e3 : 1e4,
+      ...receipt.metadata_commitment ? { evidence_commitment: receipt.metadata_commitment } : {}
+    };
+    if (negativeEvidenceAllowed(edge, input.graph_profile)) edges.push(edge);
   }
   for (const attestation of [...input.attestations ?? []].sort((a, b2) => a.issued_at.localeCompare(b2.issued_at) || attestationHash(a).localeCompare(attestationHash(b2)))) {
     const valid = await identityHasValidSignature({
@@ -36667,7 +36809,7 @@ async function constructGraphFromEvidenceV0(input) {
       signature: attestation.signature
     });
     if (!valid || attestation.expires_at && Date.parse(attestation.expires_at) <= Date.parse(input.at_time)) continue;
-    edges.push({
+    const edge = {
       src: attestation.issuer,
       dst: attestation.subject,
       type: `attestation:${attestation.attestation_class}`,
@@ -36675,13 +36817,15 @@ async function constructGraphFromEvidenceV0(input) {
       weight_bps: graphBaseWeightBps(input.graph_profile, "attestation"),
       source_quality_bps: issuerQualityBps(input.graph_profile, attestation.issuer),
       decay_bps: graphDecayBps(input.graph_profile, "attestation", attestation.issued_at, input.at_time),
-      issuer: attestation.issuer
-    });
+      issuer: attestation.issuer,
+      evidence_commitment: attestation.claim_commitment
+    };
+    if (negativeEvidenceAllowed(edge, input.graph_profile)) edges.push(edge);
   }
   for (const policy of [...input.delegation_policies ?? []].sort((a, b2) => a.valid_from.localeCompare(b2.valid_from) || delegationPolicyV2Hash(a).localeCompare(delegationPolicyV2Hash(b2)))) {
     const document = await input.resolver.resolveTrustID(policy.principal, policy.valid_from);
     const key = document?.verification_methods.find((method) => method.type === "ed25519" && method.status === "active") ?? null;
-    const valid = key && keyActiveAt(key, policy.valid_from) && notRevokedAt(key) && verifyEd25519(key.public_key, delegationPolicyV2Hash(policy), policy.signature);
+    const valid = key && keyActiveAt(key, policy.valid_from) && notRevokedAt(key, policy.valid_from) && verifyEd25519(key.public_key, delegationPolicyV2Hash(policy), policy.signature);
     if (!valid || policy.effect !== "allow" || Date.parse(policy.valid_from) > Date.parse(input.at_time) || Date.parse(policy.valid_until) <= Date.parse(input.at_time)) {
       continue;
     }
@@ -36694,10 +36838,19 @@ async function constructGraphFromEvidenceV0(input) {
       decay_bps: 1e4
     });
   }
-  return constructGraphFromRawEdgesForTestV0({ edges });
+  return graphFromVerifiedEdgesV0(edges);
 }
 function isNegativeGraphEdge(edge) {
   return edge.type === "disputed" || edge.type.includes("negative") || edge.type.includes("scam_warning") || edge.type.includes("revoked") || edge.type.includes("appealed_negative");
+}
+function isReceiptGraphEdge(edge) {
+  return ["received", "replied", "transacted", "completed", "disputed"].includes(edge.type) || edge.type.includes("receipt");
+}
+function negativeEvidenceAllowed(edge, graphProfile) {
+  if (!isNegativeGraphEdge(edge)) return true;
+  if (graphProfile.negative_edge_policy.requires_evidence_commitment && !edge.evidence_commitment) return false;
+  if (graphProfile.negative_edge_policy.requires_appeal_uri && !edge.appeal_uri && !edge.appeal_status) return false;
+  return true;
 }
 function effectiveWeight(edge, graphProfile) {
   let value = clampBps(edge.weight_bps);
@@ -36808,6 +36961,40 @@ function normalizeCommunityIds(assignments) {
   }
   return output3;
 }
+function applyMinClusterSize(graph, graphProfile, assignments) {
+  const minSize = graphProfile.community_detection.min_cluster_size ?? 1;
+  if (minSize <= 1) return normalizeCommunityIds(assignments);
+  const output3 = new Map(assignments);
+  const groups = () => {
+    const current = /* @__PURE__ */ new Map();
+    for (const [node, community] of output3.entries()) {
+      const nodes = current.get(community) ?? [];
+      nodes.push(node);
+      current.set(community, nodes);
+    }
+    return current;
+  };
+  for (const [community, nodes] of [...groups().entries()].sort((a, b2) => a[0] - b2[0])) {
+    if (nodes.length >= minSize) continue;
+    const candidateMass = /* @__PURE__ */ new Map();
+    for (const edge of graph.edges) {
+      const srcSmall = nodes.includes(edge.src);
+      const dstSmall = nodes.includes(edge.dst);
+      if (srcSmall === dstSmall) continue;
+      const other = srcSmall ? edge.dst : edge.src;
+      const otherCommunity = output3.get(other);
+      if (otherCommunity === void 0 || otherCommunity === community) continue;
+      const otherSize = groups().get(otherCommunity)?.length ?? 0;
+      if (otherSize < minSize) continue;
+      candidateMass.set(otherCommunity, (candidateMass.get(otherCommunity) ?? 0) + Math.max(0, signedEffectiveWeight(edge, graphProfile)));
+    }
+    const best = [...candidateMass.entries()].sort((a, b2) => b2[1] - a[1] || a[0] - b2[0])[0]?.[0];
+    if (best !== void 0) {
+      for (const node of nodes) output3.set(node, best);
+    }
+  }
+  return normalizeCommunityIds(output3);
+}
 function undirectedPositiveMass(graph, graphProfile) {
   const floor = graphProfile.community_detection.edge_weight_floor_bps ?? 0;
   const pairMass = /* @__PURE__ */ new Map();
@@ -36914,8 +37101,17 @@ function deterministicLeidenRefinementV1(graph, graphProfile) {
 function communityResult(graph, graphProfile) {
   const assignments = communityAssignments(graph, graphProfile);
   if (!graphProfile) return { assignments, modularity_bps: 0, pass_count: 1 };
-  if (graphProfile.community_detection.algorithm === "louvain_modularity_v1") return deterministicLouvainModularityV1(graph, graphProfile);
-  if (graphProfile.community_detection.algorithm === "leiden_refinement_v1") return deterministicLeidenRefinementV1(graph, graphProfile);
+  const algorithm = normalizeCommunityAlgorithm(graphProfile.community_detection.algorithm);
+  if (algorithm === "louvain_modularity_v1") {
+    const result = deterministicLouvainModularityV1(graph, graphProfile);
+    const applied = applyMinClusterSize(graph, graphProfile, result.assignments);
+    return { assignments: applied, modularity_bps: modularityBps(graph, graphProfile, applied), pass_count: result.pass_count };
+  }
+  if (algorithm === "leiden_refinement_v1") {
+    const result = deterministicLeidenRefinementV1(graph, graphProfile);
+    const applied = applyMinClusterSize(graph, graphProfile, result.assignments);
+    return { assignments: applied, modularity_bps: modularityBps(graph, graphProfile, applied), pass_count: result.pass_count };
+  }
   return { assignments, modularity_bps: modularityBps(graph, graphProfile, assignments), pass_count: 1 };
 }
 function communityAssignments(graph, graphProfile) {
@@ -36923,14 +37119,10 @@ function communityAssignments(graph, graphProfile) {
   if (graphProfile.community_detection.algorithm === "none") {
     return new Map([...graph.nodes].sort().map((node, index) => [node, index]));
   }
-  const algorithm = graphProfile.community_detection.algorithm;
+  const algorithm = normalizeCommunityAlgorithm(graphProfile.community_detection.algorithm);
   const floor = graphProfile.community_detection.edge_weight_floor_bps ?? 1e3;
-  if (algorithm === "connected_components" || algorithm === "connected_components_v0") return connectedComponents(graph, floor);
-  if (algorithm === "louvain_modularity_v0") return deterministicWeightedLabelPropagation(graph, graphProfile);
-  if (algorithm === "leiden_refinement_v0") return deterministicLeidenRefinement(graph, graphProfile);
-  if (algorithm === "louvain_modularity_v1") return deterministicLouvainModularityV1(graph, graphProfile).assignments;
-  if (algorithm === "leiden_refinement_v1") return deterministicLeidenRefinementV1(graph, graphProfile).assignments;
-  return connectedComponents(graph, floor);
+  const assignments = algorithm === "connected_components" || algorithm === "connected_components_v0" ? connectedComponents(graph, floor) : algorithm === "louvain_modularity_v0" ? deterministicWeightedLabelPropagation(graph, graphProfile) : algorithm === "leiden_refinement_v0" ? deterministicLeidenRefinement(graph, graphProfile) : algorithm === "louvain_modularity_v1" ? deterministicLouvainModularityV1(graph, graphProfile).assignments : algorithm === "leiden_refinement_v1" ? deterministicLeidenRefinementV1(graph, graphProfile).assignments : connectedComponents(graph, floor);
+  return applyMinClusterSize(graph, graphProfile, assignments);
 }
 function componentOfSubject(graph, subject, graphProfile) {
   const components = communityAssignments(graph, graphProfile);
@@ -37023,11 +37215,24 @@ function computeGraphFeatureVectorV0(input) {
   const adversarialMass = incident.reduce((sum, edge) => sum + (adversarialSeedSet.has(edge.src) || adversarialSeedSet.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
   const communitiesResult = communityResult(input.graph, input.graph_profile);
   const communities = communitiesResult.assignments;
+  const subjectCommunityId = communities.get(input.subject);
   const community = componentOfSubject(input.graph, input.subject, input.graph_profile);
   const communityTouching = input.graph.edges.filter((edge) => community.has(edge.src) || community.has(edge.dst));
-  const communityMass = communityTouching.reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
-  const communityEscapeMass = communityTouching.reduce(
+  const subjectInternalMass = [...counterpartySet].reduce((sum, counterparty) => {
+    if (communities.get(counterparty) !== subjectCommunityId) return sum;
+    return sum + (outbound.get(counterparty) ?? 0) + (inbound.get(counterparty) ?? 0);
+  }, 0);
+  const subjectExternalMass = [...counterpartySet].reduce((sum, counterparty) => {
+    if (communities.get(counterparty) === subjectCommunityId) return sum;
+    return sum + (outbound.get(counterparty) ?? 0) + (inbound.get(counterparty) ?? 0);
+  }, 0);
+  const communityCutMass = communityTouching.reduce(
     (sum, edge) => sum + (community.has(edge.src) !== community.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0),
+    0
+  );
+  const communityVolume = communityTouching.reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
+  const complementVolume = input.graph.edges.reduce(
+    (sum, edge) => sum + (!community.has(edge.src) || !community.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0),
     0
   );
   const communityMasses = /* @__PURE__ */ new Map();
@@ -37043,12 +37248,24 @@ function computeGraphFeatureVectorV0(input) {
   const trustedDistance = shortestSeedDistance(input.graph, input.subject, seedSet, input.graph_profile);
   const adversarialDistance = shortestSeedDistance(input.graph, input.subject, adversarialSeedSet, input.graph_profile);
   const pagerank = pageRankScores(input.graph, input.graph_profile, input.trusted_seeds, input.subject);
-  const firstHopSeedScore = bps(trustedNeighborMass, totalMass);
-  const secondHopSeedMass = input.graph.edges.reduce((sum, edge) => {
-    if (!counterpartySet.has(edge.src) || !seedSet.has(edge.dst)) return sum;
-    return sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile));
-  }, 0);
-  const pprLite = clampBps(Math.floor(firstHopSeedScore * 0.85 + bps(secondHopSeedMass, Math.max(1, communityMass)) * 0.15));
+  const pprProfile = {
+    ...input.graph_profile ?? {
+      type: "tsl.graph_profile.v2",
+      profile_id: input.graph_profile_id,
+      edge_weight_profile: "default",
+      temporal_decay_profile: "none",
+      community_detection: { algorithm: "connected_components_v0", resolution_bps: 1e4, min_cluster_size: 1 },
+      seed_sets: { trusted_seed_commitment: "0x0000000000000000000000000000000000000000000000000000000000000000", adversarial_seed_commitment: "0x0000000000000000000000000000000000000000000000000000000000000000" },
+      negative_edge_policy: { requires_evidence_commitment: true, requires_appeal_uri: true, max_single_negative_weight_bps: 1500, decay_days: 30 },
+      privacy_policy: { raw_counterparty_upload_required: false, allows_pairwise_private_features: true }
+    },
+    pagerank: {
+      iterations: input.graph_profile?.pagerank?.iterations ?? 20,
+      damping_bps: input.graph_profile?.pagerank?.damping_bps ?? 8500,
+      personalization: "trusted_seeds"
+    }
+  };
+  const pprLite = pageRankScores(input.graph, pprProfile, input.trusted_seeds, input.subject).get(input.subject) ?? 0;
   const unsignedVectorBasis = {
     subject: input.subject,
     graph_profile_id: input.graph_profile_id,
@@ -37068,10 +37285,10 @@ function computeGraphFeatureVectorV0(input) {
     effective_counterparty_count_milli: totalMass === 0 ? 0 : Math.floor(Math.exp(entropy / 1e4 * Math.log(Math.max(1, counterpartySet.size))) * 1e3),
     seed_escape_bps: bps(seedMass, totalMass),
     adversarial_proximity_bps: bps(adversarialMass, totalMass),
-    community_algorithm_id: input.graph_profile?.community_detection.algorithm ?? "connected_components_v0",
-    community_escape_bps: bps(communityEscapeMass, communityMass),
+    community_algorithm_id: input.graph_profile ? normalizeCommunityAlgorithm(input.graph_profile.community_detection.algorithm) : "connected_components_v0",
+    community_escape_bps: bps(subjectExternalMass, subjectInternalMass + subjectExternalMass),
     community_diversity_bps: clampBps(1e4 - communityHhi),
-    conductance_bps: bps(communityEscapeMass, communityMass + communityEscapeMass),
+    conductance_bps: bps(communityCutMass, Math.min(communityVolume, complementVolume)),
     trusted_neighbor_mass_bps: bps(trustedNeighborMass, totalMass),
     trusted_seed_distance_bps: distanceScoreBps(trustedDistance),
     adversarial_seed_distance_bps: distanceScoreBps(adversarialDistance),
@@ -37079,6 +37296,8 @@ function computeGraphFeatureVectorV0(input) {
     ppr_lite_bps: pprLite,
     modularity_bps: communitiesResult.modularity_bps,
     community_pass_count: communitiesResult.pass_count,
+    cluster_concentration_bps: bps(subjectInternalMass, subjectInternalMass + subjectExternalMass),
+    feature_commitment: sha256Hex(canonicalBytes(unsignedVectorBasis)),
     recomputation_commitment: sha256Hex(canonicalBytes(unsignedVectorBasis)),
     privacy_disclosure_level: "aggregate_only",
     signature: input.signature ?? "0x00"
@@ -37092,20 +37311,79 @@ function computeSybilAssessmentV0(input) {
   const cluster = componentOfSubject(input.graph, input.subject, input.graph_profile);
   const trustedSeedSet = new Set(input.trusted_seeds ?? []);
   const adversarialSeedSet = new Set(input.adversarial_seeds ?? []);
+  const tier = input.sybil_profile?.adversary_tier ?? "B2";
+  const tierPolicy = {
+    B0: {
+      risk_adjustment_bps: -750,
+      high_threshold_bps: 7800,
+      elevated_threshold_bps: 6800,
+      contamination_threshold_bps: 3500,
+      cost_multiplier_bps: 7e3,
+      min_evidence_mass: 500,
+      default_scenario: "low_capability_dense_farm"
+    },
+    B1: {
+      risk_adjustment_bps: -250,
+      high_threshold_bps: 7400,
+      elevated_threshold_bps: 6400,
+      contamination_threshold_bps: 3e3,
+      cost_multiplier_bps: 8500,
+      min_evidence_mass: 750,
+      default_scenario: "basic_aged_farm"
+    },
+    B2: {
+      risk_adjustment_bps: 0,
+      high_threshold_bps: 7e3,
+      elevated_threshold_bps: 6500,
+      contamination_threshold_bps: 2500,
+      cost_multiplier_bps: 1e4,
+      min_evidence_mass: 1e3,
+      default_scenario: "reference_cluster_assessment"
+    },
+    B3: {
+      risk_adjustment_bps: 400,
+      high_threshold_bps: 6600,
+      elevated_threshold_bps: 5900,
+      contamination_threshold_bps: 2200,
+      cost_multiplier_bps: 13500,
+      min_evidence_mass: 1250,
+      default_scenario: "compromised_account_cluster"
+    },
+    B4: {
+      risk_adjustment_bps: 750,
+      high_threshold_bps: 6200,
+      elevated_threshold_bps: 5500,
+      contamination_threshold_bps: 1800,
+      cost_multiplier_bps: 18e3,
+      min_evidence_mass: 1500,
+      default_scenario: "issuer_collusion_bridge"
+    },
+    B5: {
+      risk_adjustment_bps: 1100,
+      high_threshold_bps: 5800,
+      elevated_threshold_bps: 5e3,
+      contamination_threshold_bps: 1500,
+      cost_multiplier_bps: 25e3,
+      min_evidence_mass: 2e3,
+      default_scenario: "relay_provider_auditor_consistency_attack"
+    }
+  };
+  const tierConfig = tierPolicy[tier];
   const internalEdges = input.graph.edges.filter((edge) => cluster.has(edge.src) && cluster.has(edge.dst));
   const touchingEdges = input.graph.edges.filter((edge) => cluster.has(edge.src) || cluster.has(edge.dst));
+  const outboundClusterEdges = input.graph.edges.filter((edge) => cluster.has(edge.src));
   const internalMass = internalEdges.reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
-  const touchingMass = touchingEdges.reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
+  const touchingMass = outboundClusterEdges.reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
   const externalEdges = touchingEdges.filter((edge) => !(cluster.has(edge.src) && cluster.has(edge.dst)));
-  const trustedMass = externalEdges.reduce((sum, edge) => sum + (cluster.has(edge.src) && trustedSeedSet.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
+  const trustedMass = outboundClusterEdges.reduce((sum, edge) => sum + (!cluster.has(edge.dst) && trustedSeedSet.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
   const adversarialMass = touchingEdges.reduce((sum, edge) => sum + (adversarialSeedSet.has(edge.src) || adversarialSeedSet.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
   const concentration = bps(internalMass, touchingMass);
   const trustedEscape = bps(trustedMass, touchingMass);
-  const internalReceiptMass = internalEdges.filter((edge) => edge.type.includes("receipt")).reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
-  const touchingReceiptMass = touchingEdges.filter((edge) => edge.type.includes("receipt")).reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
+  const internalReceiptMass = internalEdges.filter((edge) => isReceiptGraphEdge(edge)).reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
+  const touchingReceiptMass = outboundClusterEdges.filter((edge) => isReceiptGraphEdge(edge)).reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
   const internalReceiptRatio = bps(internalReceiptMass, touchingReceiptMass);
   const receiptPairs = /* @__PURE__ */ new Map();
-  for (const edge of internalEdges.filter((candidate) => candidate.type.includes("receipt"))) {
+  for (const edge of internalEdges.filter((candidate) => isReceiptGraphEdge(candidate))) {
     const [left, right] = [edge.src, edge.dst].sort();
     const key = `${left}\0${right}`;
     const pair = receiptPairs.get(key) ?? { forward: 0, reverse: 0 };
@@ -37135,19 +37413,20 @@ function computeSybilAssessmentV0(input) {
   const risk_score_bps = clampBps(
     Math.floor(
       (concentration * 20 + internalReceiptRatio * 12 + receiptSymmetry * 8 + creationSync * 12 + issuerReuse * 10 + seedContamination * 22 + (1e4 - trustedEscape) * 10 + (1e4 - externalDiversity) * 6) / 100
-    )
+    ) + tierConfig.risk_adjustment_bps
   );
-  const minEvidenceMass = input.sybil_profile?.min_evidence_mass ?? 1e3;
-  const risk_label = touchingMass < minEvidenceMass ? "insufficient_evidence" : concentration > 8500 && trustedEscape < 500 ? "high" : seedContamination > 2500 ? "elevated" : risk_score_bps >= 6500 ? "elevated" : internalReceiptRatio > 7500 && trustedEscape < 1500 ? "medium" : "low";
+  const minEvidenceMass = input.sybil_profile?.min_evidence_mass ?? tierConfig.min_evidence_mass;
   const costComponents = {
-    identity_cost_minor_units: cluster.size * (input.sybil_profile?.base_identity_cost_minor_units ?? 25e3),
-    time_aging_cost_minor_units: cluster.size * (input.sybil_profile?.time_aging_cost_minor_units ?? 1e3),
-    external_receipt_cost_minor_units: Math.floor(externalMass / 1e4 * (input.sybil_profile?.external_receipt_cost_minor_units ?? 7500)),
-    attestation_cost_minor_units: internalEdges.filter((edge) => edge.type.includes("attestation")).length * (input.sybil_profile?.attestation_cost_minor_units ?? 1e4),
-    compromise_cost_minor_units: input.sybil_profile?.compromise_cost_minor_units ?? 0,
-    evasion_cost_minor_units: Math.floor(risk_score_bps / 1e4 * (input.sybil_profile?.evasion_cost_minor_units ?? 5e3))
+    identity_cost_minor_units: Math.floor(cluster.size * (input.sybil_profile?.base_identity_cost_minor_units ?? 25e3) * tierConfig.cost_multiplier_bps / 1e4),
+    time_aging_cost_minor_units: Math.floor(cluster.size * (input.sybil_profile?.time_aging_cost_minor_units ?? 1e3) * tierConfig.cost_multiplier_bps / 1e4),
+    external_receipt_cost_minor_units: Math.floor(externalMass / 1e4 * (input.sybil_profile?.external_receipt_cost_minor_units ?? 7500) * tierConfig.cost_multiplier_bps / 1e4),
+    attestation_cost_minor_units: Math.floor(internalEdges.filter((edge) => edge.type.includes("attestation")).length * (input.sybil_profile?.attestation_cost_minor_units ?? 1e4) * tierConfig.cost_multiplier_bps / 1e4),
+    compromise_cost_minor_units: Math.floor((input.sybil_profile?.compromise_cost_minor_units ?? 0) * tierConfig.cost_multiplier_bps / 1e4),
+    evasion_cost_minor_units: Math.floor(risk_score_bps / 1e4 * (input.sybil_profile?.evasion_cost_minor_units ?? 5e3) * tierConfig.cost_multiplier_bps / 1e4)
   };
   const attackCost = Object.values(costComponents).reduce((sum, value) => sum + value, 0) + Math.floor(internalMass / 1e4) * (input.sybil_profile?.internal_edge_cost_minor_units ?? 5e3);
+  const attackEconomicsFailed = (input.sybil_profile?.expected_benefit_minor_units ?? 0) > 0 && attackCost <= (input.sybil_profile?.expected_benefit_minor_units ?? 0);
+  const risk_label = touchingMass < minEvidenceMass ? "insufficient_evidence" : attackEconomicsFailed ? "high" : concentration > 8500 && trustedEscape < 500 ? "high" : seedContamination > tierConfig.contamination_threshold_bps ? "elevated" : risk_score_bps >= tierConfig.high_threshold_bps ? "high" : risk_score_bps >= tierConfig.elevated_threshold_bps ? "elevated" : internalReceiptRatio > 7500 && trustedEscape < 1500 ? "medium" : "low";
   const seedSetCommitment = sha256Hex(
     canonicalBytes({
       trusted: [...trustedSeedSet].sort(),
@@ -37165,7 +37444,7 @@ function computeSybilAssessmentV0(input) {
     evidence_commitment: input.evidence_commitment ?? sha256Hex(canonicalBytes({ graph_hash: sha256Hex(canonicalBytes(input.graph)), seed_set_commitment: seedSetCommitment })),
     cluster_id_commitment: sha256Hex(canonicalBytes({ subject: input.subject, graph_profile_id: input.graph_profile.profile_id })),
     computed_at: input.computed_at ?? (/* @__PURE__ */ new Date()).toISOString(),
-    adversary_tier_assumed: input.sybil_profile?.adversary_tier ?? "B2",
+    adversary_tier_assumed: tier,
     cluster_size_bucket: `${cluster.size}-${cluster.size}`,
     cluster_concentration_bps: concentration,
     trusted_escape_bps: trustedEscape,
@@ -37178,7 +37457,7 @@ function computeSybilAssessmentV0(input) {
     attack_cost_minor_units: Math.max(0, attackCost),
     cost_components: costComponents,
     expected_benefit_minor_units: input.sybil_profile?.expected_benefit_minor_units ?? 0,
-    attack_scenario: input.sybil_profile?.attack_scenario ?? "reference_cluster_assessment",
+    attack_scenario: input.sybil_profile?.attack_scenario ?? tierConfig.default_scenario,
     risk_score_bps,
     risk_label,
     privacy_level: "cluster_commitment_only",
@@ -37188,29 +37467,46 @@ function computeSybilAssessmentV0(input) {
 function sybilAssessmentV1Hash(assessment) {
   return hashSignedObject(V2_DOMAIN_TAGS.SYBIL_ASSESSMENT_V1, assessment);
 }
-function invertRegularizedMatrix(matrix, regularization) {
+function fixedPointSqrt(value) {
+  if (value <= 0) return 0;
+  let low = 0;
+  let high = Math.max(1, value);
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const square2 = mid * mid;
+    if (square2 === value) return mid;
+    if (square2 < value) low = mid + 1;
+    else high = mid - 1;
+  }
+  return high;
+}
+function invertRegularizedMatrixFixed(matrix, regularization) {
   const size = matrix.length;
   if (!size || matrix.some((row) => row.length !== size)) return null;
+  const scale = 1000000n;
   const augmented = matrix.map((row, rowIndex) => [
-    ...row.map((value, columnIndex) => value + (rowIndex === columnIndex ? regularization : 0)),
-    ...Array.from({ length: size }, (_, columnIndex) => columnIndex === rowIndex ? 1 : 0)
+    ...row.map((value, columnIndex) => BigInt(Math.trunc(value + (rowIndex === columnIndex ? regularization : 0)))),
+    ...Array.from({ length: size }, (_, columnIndex) => columnIndex === rowIndex ? 1n : 0n)
   ]);
   for (let column = 0; column < size; column += 1) {
     let pivot = column;
     for (let row = column + 1; row < size; row += 1) {
-      if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) pivot = row;
+      if (absBigInt(augmented[row][column]) > absBigInt(augmented[pivot][column])) pivot = row;
     }
-    if (Math.abs(augmented[pivot][column]) < 1e-9) return null;
+    if (augmented[pivot][column] === 0n) return null;
     if (pivot !== column) [augmented[pivot], augmented[column]] = [augmented[column], augmented[pivot]];
     const pivotValue = augmented[column][column];
-    for (let item = 0; item < size * 2; item += 1) augmented[column][item] /= pivotValue;
+    for (let item = 0; item < size * 2; item += 1) augmented[column][item] = augmented[column][item] * scale / pivotValue;
     for (let row = 0; row < size; row += 1) {
       if (row === column) continue;
       const factor = augmented[row][column];
-      for (let item = 0; item < size * 2; item += 1) augmented[row][item] -= factor * augmented[column][item];
+      for (let item = 0; item < size * 2; item += 1) augmented[row][item] -= factor * augmented[column][item] / scale;
     }
   }
-  return augmented.map((row) => row.slice(size));
+  return augmented.map((row) => row.slice(size).map((value) => Number(value)));
+}
+function absBigInt(value) {
+  return value < 0n ? -value : value;
 }
 function computeDriftReportV0(input) {
   if ((input.baseline_values_bps || input.observation_values_bps) && process.env["TSL_DEV_DRIFT_INPUTS"] !== "true") {
@@ -37218,6 +37514,8 @@ function computeDriftReportV0(input) {
   }
   const computedAt = input.computed_at ?? (/* @__PURE__ */ new Date()).toISOString();
   const atMs = Date.parse(computedAt);
+  const dcrit = Math.max(1, clampBps(input.dcrit_bps ?? 7500));
+  const coverage = clampBps(input.coverage_bps ?? 1e4);
   const componentKeys = ["key", "graph", "action", "cadence", "claim", "agent", "local"];
   const baselineHistory = (input.feature_history ?? []).filter((point) => {
     const ms = Date.parse(point.timestamp);
@@ -37236,20 +37534,31 @@ function computeDriftReportV0(input) {
         timestamp: new Date(atMs - (input.observation_window_days + index + 1) * 864e5).toISOString(),
         components
       }));
-      return computeDriftReportV0({
+      const cohortReport = computeDriftReportV0({
         ...input,
         feature_history: [...syntheticHistory, ...input.feature_history ?? []],
         cohort_baseline_components: void 0,
         signature: input.signature
       });
+      return {
+        ...cohortReport,
+        sparse_mode: "cohort_baseline",
+        reason_codes: [.../* @__PURE__ */ new Set(["COHORT_BASELINE", ...cohortReport.reason_codes])],
+        covariance_profile_commitment: sha256Hex(canonicalBytes({ estimator: "robust_median_covariance_fixed_point_v1", regularization: 1e4, sparse_mode: "cohort_baseline" }))
+      };
     }
     return {
       type: "tsl.drift_report.v1",
       subject: input.subject,
+      ...input.issuer ? { issuer: input.issuer } : {},
       ...input.drift_profile_id ? { drift_profile_id: input.drift_profile_id } : {},
       computed_at: computedAt,
       baseline_window_days: input.baseline_window_days,
       observation_window_days: input.observation_window_days,
+      coverage_bps: coverage,
+      dcrit_bps: dcrit,
+      dormant_penalty_bps: clampBps(input.dormant_penalty_bps ?? 2500),
+      key_penalty_bps: clampBps(input.key_penalty_bps ?? 0),
       ...input.last_verified_event_at ? { last_verified_event_at: input.last_verified_event_at } : {},
       sparse_mode: cohortAvailable ? "cohort_baseline" : "insufficient_baseline",
       recomputation_status: "recomputed_match",
@@ -37299,16 +37608,16 @@ function computeDriftReportV0(input) {
     const center = medianVector(baselineVectors);
     const covariance = covarianceMatrix(baselineVectors, center);
     const observationMean = componentKeys.map((_, index) => Math.floor(observationVectors.reduce((sum, vector) => sum + (vector[index] ?? 0), 0) / observationVectors.length));
-    const inverse = invertRegularizedMatrix(covariance, 1e4);
+    const inverse = invertRegularizedMatrixFixed(covariance, 1e4);
     if (!inverse) return 0;
     const delta = componentKeys.map((_, index) => observationMean[index] - center[index]);
-    let quadratic = 0;
+    let quadraticScaled = 0;
     for (let row = 0; row < delta.length; row += 1) {
       for (let column = 0; column < delta.length; column += 1) {
-        quadratic += delta[row] * inverse[row][column] * delta[column];
+        quadraticScaled += Math.trunc(delta[row] * inverse[row][column] * delta[column] / 1e6);
       }
     }
-    return clampBps(Math.floor(Math.sqrt(Math.max(0, quadratic)) * 1e3));
+    return clampBps(fixedPointSqrt(Math.max(0, quadraticScaled)) * 1e3);
   };
   const derivedComponents = {};
   for (const component of componentKeys) {
@@ -37326,9 +37635,14 @@ function computeDriftReportV0(input) {
   const historyHighValue = observationHistory.some((point) => point.high_value_action);
   const historyNewDelegation = observationHistory.some((point) => point.new_delegation_pattern);
   const historyAdverse = observationHistory.some((point) => point.adverse_evidence);
-  const drift = Math.max(robustDistance(baselineValues, observationValues), robustMahalanobisBps(), componentDrift);
   const dormant = (daysSinceLastVerifiedEvent ?? 0) >= (input.dormant_days ?? 90) && (input.high_value_action === true || input.new_delegation_pattern === true || historyHighValue || historyNewDelegation);
-  const severeAdverse = (input.adverse_evidence === true || historyAdverse) && drift >= 7e3;
+  const mahaRisk = Math.min(1e4, Math.floor(robustMahalanobisBps() * 1e4 / dcrit));
+  const dormantPenalty = dormant ? clampBps(input.dormant_penalty_bps ?? 2500) : 0;
+  const keyPenalty = Math.max(componentValues.find(([component]) => component === "key")?.[1] ?? 0, clampBps(input.key_penalty_bps ?? 0));
+  const drift = clampBps(Math.floor(mahaRisk * coverage / 1e4) + dormantPenalty + keyPenalty);
+  const severeAdverse = (input.adverse_evidence === true || historyAdverse) && drift >= 5e3;
+  const driftLabel = dormant ? "dormant_reactivation" : severeAdverse || drift >= 7500 ? "severe" : drift >= 5e3 ? "high" : drift >= 2500 ? "moderate" : "stable";
+  const driftAction = dormant ? "step_up" : driftLabel === "severe" ? input.severe_action ?? "temporary_block" : driftLabel === "high" ? "step_up" : driftLabel === "moderate" ? "lower_confidence" : "none";
   return {
     type: "tsl.drift_report.v1",
     subject: input.subject,
@@ -37338,17 +37652,17 @@ function computeDriftReportV0(input) {
     observation_window_days: input.observation_window_days,
     feature_history_commitment: input.feature_history ? sha256Hex(canonicalBytes(input.feature_history)) : void 0,
     baseline_profile_commitment: sha256Hex(canonicalBytes({ baseline_window_days: input.baseline_window_days, min_baseline_points: input.min_baseline_points ?? 2 })),
-    covariance_profile_commitment: sha256Hex(canonicalBytes({ estimator: "robust_median_covariance_diagonal_regularized_v0", regularization: 1e4 })),
+    covariance_profile_commitment: sha256Hex(canonicalBytes({ estimator: "robust_median_covariance_fixed_point_v1", regularization: 1e4, dcrit_bps: dcrit, coverage_bps: coverage })),
     ...lastVerifiedEventAt ? { last_verified_event_at: lastVerifiedEventAt } : {},
     ...daysSinceLastVerifiedEvent !== void 0 ? { days_since_last_verified_event: Math.max(0, daysSinceLastVerifiedEvent) } : {},
     sparse_mode: "none",
     recomputation_status: "recomputed_match",
-    drift_score_bps: dormant ? Math.max(drift, 8e3) : drift,
-    drift_label: dormant ? "dormant_reactivation" : severeAdverse || drift >= 7e3 ? "severe" : drift >= 4e3 ? "moderate" : drift >= 1500 ? "minor" : "stable",
-    action: dormant ? "step_up" : severeAdverse || drift >= 7e3 ? "human_review" : drift >= 4e3 ? "lower_confidence" : "none",
+    drift_score_bps: drift,
+    drift_label: driftLabel,
+    action: driftAction,
     reason_codes: dormant ? ["DORMANT_REACTIVATION", "NEW_HIGH_VALUE_ACTION", ...componentValues.map(([component]) => `DRIFT_${component.toUpperCase()}`)] : [
       ...input.adverse_evidence ? ["ADVERSE_EVIDENCE"] : [],
-      ...componentValues.filter(([, score]) => score >= 1500).map(([component]) => `DRIFT_${component.toUpperCase()}`)
+      ...componentValues.filter(([, score]) => score >= 2500).map(([component]) => `DRIFT_${component.toUpperCase()}`)
     ],
     component_scores_bps: componentScores,
     signature: input.signature ?? "0x00"
@@ -37486,6 +37800,14 @@ function verifyDelegatedAgentActionV0(input) {
 }
 
 // packages/core-ts/src/verifier.ts
+function checkpointHashForPolicy(checkpoint) {
+  return process.env.ALLOW_LEGACY_CHECKPOINT_HASH_V0 === "true" ? legacyCheckpointHashV0(checkpoint) : checkpointHash(checkpoint);
+}
+function normalizeGraphAlgorithm(algorithm) {
+  if (algorithm === "louvain") return "louvain_modularity_v1";
+  if (algorithm === "leiden") return "leiden_refinement_v1";
+  return algorithm;
+}
 var defaultChecks = () => ({
   schema_valid: false,
   signature_valid: false,
@@ -37497,6 +37819,113 @@ var defaultChecks = () => ({
   checkpoint_matches_proof: false,
   checkpoint_settled: false
 });
+var STRICT_POLICY_DEFAULTS = {
+  require_disclosure_consent_for_private_fields: true,
+  reject_dev_zk_circuits: true,
+  reject_unsafe_fixtures_on_mainnet: true,
+  require_four_root_checkpoint: true,
+  require_exact_graph_formulas: true,
+  require_behavioral_sybil_tiers: true,
+  require_core_drift_formula: true,
+  require_profile_signed_scoring: true
+};
+function sameCanonical(left, right) {
+  if (left === void 0 || right === void 0) return true;
+  try {
+    return Buffer.from(canonicalBytes(left)).equals(Buffer.from(canonicalBytes(right)));
+  } catch {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+}
+function expandProofBundleInput(input) {
+  const bundle = input.proof_bundle;
+  if (!bundle) return { input, errors: [] };
+  const errors = [];
+  const conflictFields = [
+    "envelope",
+    "proof",
+    "checkpoint",
+    "receipts",
+    "attestations",
+    "revocations",
+    "assessment",
+    "assessment_v2",
+    "scoring_profile",
+    "domain_policy",
+    "evidence_coverage",
+    "metadata_fingerprints",
+    "graph_profile",
+    "graph_feature_vector",
+    "trusted_seeds",
+    "adversarial_seeds",
+    "trusted_seed_governance",
+    "adversarial_seed_governance",
+    "event_receivers",
+    "sybil_assessment",
+    "sybil_profile",
+    "drift_report",
+    "drift_feature_history",
+    "drift_cohort_baseline_components",
+    "zk_proofs",
+    "zk_circuit_manifests",
+    "zk_verification_key_registry",
+    "delegations",
+    "delegation_policies",
+    "agent_actions",
+    "audit_findings",
+    "consistency_proofs",
+    "non_membership_proofs",
+    "governance_policy",
+    "message_disclosure",
+    "disclosure_consents"
+  ];
+  for (const field of conflictFields) {
+    if (input[field] !== void 0 && bundle[field] !== void 0 && !sameCanonical(input[field], bundle[field])) {
+      errors.push("TSL_PROOF_BUNDLE_FIELD_CONFLICT");
+    }
+  }
+  const bundleInput = Object.fromEntries(
+    Object.entries(bundle).filter(([, value]) => value !== null)
+  );
+  return {
+    input: {
+      ...bundleInput,
+      ...input,
+      proof_bundle: bundle,
+      envelope: input.envelope ?? bundle.envelope,
+      proof: input.proof ?? bundle.proof,
+      checkpoint: input.checkpoint ?? bundle.checkpoint,
+      redaction_manifest: input.redaction_manifest ?? bundle.redaction_manifest
+    },
+    errors
+  };
+}
+function actualRedactionState(input) {
+  const rawContent = input.message_disclosure?.raw_message !== void 0;
+  const contentSalt = input.message_disclosure?.content_salt !== void 0;
+  const exactCounterparties = Boolean(input.receipts?.length);
+  const restrictedAttestations = Boolean(input.attestations?.some((attestation) => attestation.visibility !== "public"));
+  const redacted = new Set(input.redaction_manifest?.metadata_fields_redacted ?? []);
+  if (!rawContent) redacted.add("raw_content");
+  if (!contentSalt) redacted.add("content_salt");
+  if (!exactCounterparties) redacted.add("exact_counterparties");
+  if (!restrictedAttestations) redacted.add("restricted_attestations");
+  return {
+    raw_content_included: rawContent || contentSalt,
+    exact_counterparties_included: exactCounterparties,
+    metadata_fields_redacted: [...redacted].sort()
+  };
+}
+function redactionManifestMatches(input) {
+  if (!input.redaction_manifest) return !(input.proof_bundle || input.receipts?.length || input.message_disclosure || input.attestations?.some((attestation) => attestation.visibility !== "public"));
+  const actual = actualRedactionState(input);
+  if (input.redaction_manifest.raw_content_included !== actual.raw_content_included) return false;
+  if (input.redaction_manifest.exact_counterparties_included !== actual.exact_counterparties_included) return false;
+  const declared = new Set(input.redaction_manifest.metadata_fields_redacted);
+  if (!actual.raw_content_included && (!declared.has("raw_content") || !declared.has("content_salt"))) return false;
+  if (!actual.exact_counterparties_included && !declared.has("exact_counterparties")) return false;
+  return true;
+}
 function checkpointRootForKind(checkpoint, kind) {
   if (kind === "event") return checkpoint.event_root;
   if (kind === "receipt") return checkpoint.receipt_root;
@@ -37518,7 +37947,7 @@ async function disclosureConsentAllows(input, fieldClasses, resolver, policy) {
     const forbidden = new Set(consent.forbidden_field_classes);
     if (!fieldClasses.every((fieldClass) => allowed.has(fieldClass) && !forbidden.has(fieldClass))) continue;
     const identity = await resolver.resolveTrustID(consent.subject, consent.issued_at);
-    const consentKey = identity?.verification_methods.find((method) => keyActiveAt(method, consent.issued_at) && notRevokedAt(method));
+    const consentKey = identity?.verification_methods.find((method) => keyActiveAt(method, consent.issued_at) && notRevokedAt(method, consent.issued_at));
     if (consentKey?.type === "ed25519" && verifyEd25519(consentKey.public_key, disclosureConsentV1Hash(consent), consent.signature)) {
       return true;
     }
@@ -37540,15 +37969,25 @@ async function seedGovernanceProfileValid(input) {
   if (input.expectedGovernanceCommitment && input.expectedGovernanceCommitment !== seedGovernanceProfileHash(profile)) return false;
   if (!profile.signature) return false;
   const issuerIdentity = await input.resolver.resolveTrustID(profile.issuer, profile.reviewed_at);
-  const issuerKey = issuerIdentity?.verification_methods.find((method) => keyActiveAt(method, profile.reviewed_at) && notRevokedAt(method));
+  const issuerKey = issuerIdentity?.verification_methods.find((method) => keyActiveAt(method, profile.reviewed_at) && notRevokedAt(method, profile.reviewed_at));
   return issuerKey?.type === "ed25519" && verifyEd25519(issuerKey.public_key, seedGovernanceProfileHash(profile), profile.signature);
 }
 async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
+  policy = { ...STRICT_POLICY_DEFAULTS, ...policy };
+  const expanded = expandProofBundleInput(input);
+  input = expanded.input;
   const checks = defaultChecks();
-  const errors = [];
+  const errors = [...expanded.errors];
   const explanation = [];
   let settlementStatus = policy.require_settlement ? "pending" : "not_required";
   let riskLabel = "not_assessed";
+  if (policy.reject_unsafe_fixtures_on_mainnet && process.env.TSL_NETWORK === "mainnet") {
+    for (const flag of ["ALLOW_UNSAFE_CHECKPOINT_SIGNATURE_FIXTURES", "ALLOW_UNSAFE_ZK_HASH_FIXTURES", "ALLOW_LEGACY_CHECKPOINT_HASH_V0"]) {
+      if (process.env[flag] === "true") errors.push("TSL_UNSAFE_FIXTURE_POLICY_ENABLED");
+    }
+  }
+  checks.redaction_manifest_valid = redactionManifestMatches(input);
+  if (!checks.redaction_manifest_valid) errors.push("TSL_REDACTION_MANIFEST_INVALID");
   const eventValidation = validateSchema("event", input.envelope);
   checks.schema_valid = eventValidation.valid;
   if (!eventValidation.valid) {
@@ -37571,7 +38010,7 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
   const key = findVerificationMethod(identity, input.envelope.signing_key_id);
   checks.key_found = key !== null;
   checks.key_active = keyActiveAt(key, input.envelope.timestamp);
-  checks.not_revoked = notRevokedAt(key);
+  checks.not_revoked = notRevokedAt(key, input.envelope.timestamp);
   if (key?.type === "ed25519") {
     checks.signature_valid = verifyEd25519(key.public_key, unsignedEventHash, input.envelope.signature);
   }
@@ -37621,12 +38060,16 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
     }
     if (checks.revocation_state_valid) explanation.push("Signed revocation state is valid");
   }
-  if (input.message_disclosure?.raw_message !== void 0 && input.message_disclosure.content_salt) {
-    checks.disclosure_consent_valid = await disclosureConsentAllows(input, ["raw_content", "content_salt"], resolver, policy);
+  if (input.message_disclosure?.raw_message !== void 0 || input.message_disclosure?.content_salt !== void 0) {
+    const fieldClasses = [
+      ...input.message_disclosure.raw_message !== void 0 ? ["raw_content"] : [],
+      ...input.message_disclosure.content_salt !== void 0 ? ["content_salt"] : []
+    ];
+    checks.disclosure_consent_valid = policy.require_disclosure_consent_for_private_fields === false ? true : await disclosureConsentAllows(input, fieldClasses, resolver, policy);
     if (!checks.disclosure_consent_valid) {
-      errors.push("TSL_DISCLOSURE_CONSENT_MISSING");
+      errors.push("TSL_DISCLOSURE_CONSENT_REQUIRED");
     }
-    checks.content_commitment_matches = checks.disclosure_consent_valid && contentCommitment(input.message_disclosure.raw_message, input.message_disclosure.content_salt) === input.envelope.content_commitment;
+    checks.content_commitment_matches = input.message_disclosure.raw_message !== void 0 && input.message_disclosure.content_salt !== void 0 && checks.disclosure_consent_valid && contentCommitment(input.message_disclosure.raw_message, input.message_disclosure.content_salt) === input.envelope.content_commitment;
     if (checks.content_commitment_matches) {
       explanation.push("Disclosed message matches content commitment");
     }
@@ -37645,6 +38088,14 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
   }
   if (input.receipts?.length) {
     checks.receipt_valid = true;
+    if (policy.require_disclosure_consent_for_private_fields !== false) {
+      const consent = await disclosureConsentAllows(input, ["exact_counterparties"], resolver, policy);
+      checks.disclosure_consent_valid = checks.disclosure_consent_valid !== false && consent;
+      if (!consent) {
+        checks.receipt_valid = false;
+        errors.push("TSL_DISCLOSURE_CONSENT_REQUIRED");
+      }
+    }
     for (const receipt of input.receipts) {
       const validation = validateSchema("receipt", receipt);
       if (!validation.valid) {
@@ -37659,11 +38110,31 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
         checks.receipt_valid = false;
         errors.push("TSL_RECEIPT_INVALID");
       }
+      if (policy.require_receipt_inclusion_for_disclosed_receipts || policy.require_disclosure_consent_for_private_fields !== false) {
+        const receiptCommitment = receiptHash(receipt);
+        const receiptProof = input.receipt_proofs?.find((proof) => proof.commitment === receiptCommitment);
+        const receiptProofValid = Boolean(
+          receiptProof && validateSchema("inclusionProof", receiptProof).valid && receiptProof.tree_kind === "receipt" && verifyInclusion(receiptProof) && (!input.checkpoint || receiptProof.checkpoint_hash === checkpointHashForPolicy(input.checkpoint) && receiptProof.root === input.checkpoint.receipt_root && receiptProof.epoch_start_ms === input.checkpoint.epoch_start_ms && receiptProof.shard === input.checkpoint.shard)
+        );
+        checks.receipt_included = checks.receipt_included !== false && receiptProofValid;
+        if (!receiptProofValid) {
+          checks.receipt_valid = false;
+          errors.push("TSL_RECEIPT_INCLUSION_INVALID");
+        }
+      }
     }
     if (checks.receipt_valid) explanation.push("Receipt signatures valid");
   }
   if (input.attestations?.length) {
     checks.attestation_valid = true;
+    if (policy.require_disclosure_consent_for_private_fields !== false && input.attestations.some((attestation) => attestation.visibility !== "public")) {
+      const consent = await disclosureConsentAllows(input, ["attestations"], resolver, policy);
+      checks.disclosure_consent_valid = checks.disclosure_consent_valid !== false && consent;
+      if (!consent) {
+        checks.attestation_valid = false;
+        errors.push("TSL_DISCLOSURE_CONSENT_REQUIRED");
+      }
+    }
     for (const attestation of input.attestations) {
       const validation = validateSchema("attestation", attestation);
       if (!validation.valid) {
@@ -37804,10 +38275,10 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
     if (input.graph_feature_vector) {
       const subjectIdentity = await resolver.resolveTrustID(input.graph_feature_vector.subject, input.graph_feature_vector.computed_at);
       const subjectKey = subjectIdentity?.verification_methods.find((method) => keyActiveAt(method, input.graph_feature_vector.computed_at));
-      checks.graph_artifacts_valid = checks.graph_artifacts_valid && input.graph_feature_vector.subject === input.envelope.sender && (!policy.require_research_graph_algorithm || input.graph_feature_vector.community_algorithm_id === input.graph_profile?.community_detection.algorithm) && subjectKey?.type === "ed25519" && verifyEd25519(subjectKey.public_key, graphFeatureVectorV1Hash(input.graph_feature_vector), input.graph_feature_vector.signature);
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && input.graph_feature_vector.subject === input.envelope.sender && (!policy.require_research_graph_algorithm || input.graph_feature_vector.community_algorithm_id === normalizeGraphAlgorithm(input.graph_profile?.community_detection.algorithm)) && subjectKey?.type === "ed25519" && verifyEd25519(subjectKey.public_key, graphFeatureVectorV1Hash(input.graph_feature_vector), input.graph_feature_vector.signature);
     }
     if (policy.require_research_graph_algorithm) {
-      const algorithm = input.graph_profile?.community_detection.algorithm;
+      const algorithm = normalizeGraphAlgorithm(input.graph_profile?.community_detection.algorithm);
       checks.research_graph_algorithm_valid = algorithm === "louvain_modularity_v1" || algorithm === "leiden_refinement_v1";
       if (!checks.research_graph_algorithm_valid) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.research_graph_algorithm_valid;
@@ -37854,10 +38325,11 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.sybil_assessment_valid;
     }
     if (input.drift_report) {
-      const subjectIdentity = await resolver.resolveTrustID(input.drift_report.subject, input.drift_report.computed_at);
-      const subjectKey = subjectIdentity?.verification_methods.find((method) => keyActiveAt(method, input.drift_report.computed_at));
+      const issuerOrSubject = input.drift_report.issuer ?? input.drift_report.subject;
+      const issuerIdentity = await resolver.resolveTrustID(issuerOrSubject, input.drift_report.computed_at);
+      const issuerKey = issuerIdentity?.verification_methods.find((method) => keyActiveAt(method, input.drift_report.computed_at));
       checks.drift_report_valid = Boolean(
-        input.drift_report.subject === input.envelope.sender && subjectKey?.type === "ed25519" && verifyEd25519(subjectKey.public_key, driftReportV1Hash(input.drift_report), input.drift_report.signature)
+        input.drift_report.subject === input.envelope.sender && issuerKey?.type === "ed25519" && verifyEd25519(issuerKey.public_key, driftReportV1Hash(input.drift_report), input.drift_report.signature)
       );
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.drift_report_valid;
     }
@@ -37885,8 +38357,10 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
         computed_at: input.graph_feature_vector.computed_at
       });
       const graphMatches = recomputed.weighted_degree_bps === input.graph_feature_vector.weighted_degree_bps && recomputed.reciprocity_bps === input.graph_feature_vector.reciprocity_bps && recomputed.counterparty_hhi_bps === input.graph_feature_vector.counterparty_hhi_bps && recomputed.counterparty_entropy_bps === input.graph_feature_vector.counterparty_entropy_bps && recomputed.effective_counterparty_count_milli === input.graph_feature_vector.effective_counterparty_count_milli && recomputed.seed_escape_bps === input.graph_feature_vector.seed_escape_bps && recomputed.adversarial_proximity_bps === input.graph_feature_vector.adversarial_proximity_bps && recomputed.community_algorithm_id === input.graph_feature_vector.community_algorithm_id && recomputed.community_escape_bps === input.graph_feature_vector.community_escape_bps && recomputed.community_diversity_bps === input.graph_feature_vector.community_diversity_bps && recomputed.conductance_bps === input.graph_feature_vector.conductance_bps && recomputed.trusted_neighbor_mass_bps === input.graph_feature_vector.trusted_neighbor_mass_bps && recomputed.trusted_seed_distance_bps === input.graph_feature_vector.trusted_seed_distance_bps && recomputed.adversarial_seed_distance_bps === input.graph_feature_vector.adversarial_seed_distance_bps && recomputed.pagerank_bps === input.graph_feature_vector.pagerank_bps && recomputed.ppr_lite_bps === input.graph_feature_vector.ppr_lite_bps && recomputed.modularity_bps === input.graph_feature_vector.modularity_bps && recomputed.community_pass_count === input.graph_feature_vector.community_pass_count;
-      checks.graph_artifacts_valid = checks.graph_artifacts_valid && graphMatches;
-      if (!graphMatches) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
+      const graphCommitmentsMatch = recomputed.recomputation_commitment === input.graph_feature_vector.recomputation_commitment && recomputed.privacy_disclosure_level === input.graph_feature_vector.privacy_disclosure_level;
+      const fullGraphMatches = graphMatches && graphCommitmentsMatch;
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && fullGraphMatches;
+      if (!fullGraphMatches) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
     }
     if (input.sybil_assessment && input.graph_profile && evidenceGraph) {
       const sybilProfile = input.sybil_profile;
@@ -37900,7 +38374,7 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
         computed_at: input.sybil_assessment.computed_at,
         sybil_profile: sybilProfile
       });
-      const sybilMatches = recomputedSybil.cluster_concentration_bps === input.sybil_assessment.cluster_concentration_bps && recomputedSybil.trusted_escape_bps === input.sybil_assessment.trusted_escape_bps && recomputedSybil.internal_receipt_ratio_bps === input.sybil_assessment.internal_receipt_ratio_bps && recomputedSybil.risk_score_bps === input.sybil_assessment.risk_score_bps && recomputedSybil.risk_label === input.sybil_assessment.risk_label;
+      const sybilMatches = recomputedSybil.cluster_concentration_bps === input.sybil_assessment.cluster_concentration_bps && recomputedSybil.trusted_escape_bps === input.sybil_assessment.trusted_escape_bps && recomputedSybil.internal_receipt_ratio_bps === input.sybil_assessment.internal_receipt_ratio_bps && recomputedSybil.seed_set_commitment === input.sybil_assessment.seed_set_commitment && recomputedSybil.evidence_commitment === input.sybil_assessment.evidence_commitment && recomputedSybil.cluster_id_commitment === input.sybil_assessment.cluster_id_commitment && recomputedSybil.adversary_tier_assumed === input.sybil_assessment.adversary_tier_assumed && recomputedSybil.creation_sync_bps === input.sybil_assessment.creation_sync_bps && recomputedSybil.issuer_reuse_bps === input.sybil_assessment.issuer_reuse_bps && recomputedSybil.external_diversity_bps === input.sybil_assessment.external_diversity_bps && recomputedSybil.seed_contamination_bps === input.sybil_assessment.seed_contamination_bps && recomputedSybil.receipt_symmetry_bps === input.sybil_assessment.receipt_symmetry_bps && recomputedSybil.attack_cost_minor_units === input.sybil_assessment.attack_cost_minor_units && JSON.stringify(recomputedSybil.cost_components) === JSON.stringify(input.sybil_assessment.cost_components) && recomputedSybil.expected_benefit_minor_units === input.sybil_assessment.expected_benefit_minor_units && recomputedSybil.attack_scenario === input.sybil_assessment.attack_scenario && recomputedSybil.risk_score_bps === input.sybil_assessment.risk_score_bps && recomputedSybil.risk_label === input.sybil_assessment.risk_label;
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && sybilMatches;
       if (!sybilMatches) errors.push("TSL_SYBIL_ARTIFACT_INVALID");
     }
@@ -37912,10 +38386,15 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
         baseline_window_days: input.drift_report.baseline_window_days,
         observation_window_days: input.drift_report.observation_window_days,
         computed_at: input.drift_report.computed_at,
+        issuer: input.drift_report.issuer,
+        coverage_bps: input.drift_report.coverage_bps,
+        dcrit_bps: input.drift_report.dcrit_bps,
+        dormant_penalty_bps: input.drift_report.dormant_penalty_bps,
+        key_penalty_bps: input.drift_report.key_penalty_bps,
         last_verified_event_at: input.drift_report.last_verified_event_at,
         cohort_baseline_components: input.drift_cohort_baseline_components
       });
-      const driftMatches = recomputedDrift.drift_score_bps === input.drift_report.drift_score_bps && recomputedDrift.drift_label === input.drift_report.drift_label && recomputedDrift.action === input.drift_report.action && recomputedDrift.feature_history_commitment === input.drift_report.feature_history_commitment && recomputedDrift.covariance_profile_commitment === input.drift_report.covariance_profile_commitment && JSON.stringify(recomputedDrift.component_scores_bps ?? {}) === JSON.stringify(input.drift_report.component_scores_bps ?? {});
+      const driftMatches = recomputedDrift.drift_score_bps === input.drift_report.drift_score_bps && recomputedDrift.drift_label === input.drift_report.drift_label && recomputedDrift.action === input.drift_report.action && recomputedDrift.feature_history_commitment === input.drift_report.feature_history_commitment && recomputedDrift.baseline_profile_commitment === input.drift_report.baseline_profile_commitment && recomputedDrift.covariance_profile_commitment === input.drift_report.covariance_profile_commitment && recomputedDrift.sparse_mode === input.drift_report.sparse_mode && recomputedDrift.recomputation_status === input.drift_report.recomputation_status && recomputedDrift.last_verified_event_at === input.drift_report.last_verified_event_at && recomputedDrift.days_since_last_verified_event === input.drift_report.days_since_last_verified_event && recomputedDrift.coverage_bps === input.drift_report.coverage_bps && recomputedDrift.dcrit_bps === input.drift_report.dcrit_bps && recomputedDrift.dormant_penalty_bps === input.drift_report.dormant_penalty_bps && recomputedDrift.key_penalty_bps === input.drift_report.key_penalty_bps && JSON.stringify(recomputedDrift.component_scores_bps ?? {}) === JSON.stringify(input.drift_report.component_scores_bps ?? {}) && JSON.stringify(recomputedDrift.reason_codes) === JSON.stringify(input.drift_report.reason_codes);
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && driftMatches;
       if (!driftMatches) errors.push("TSL_DRIFT_ARTIFACT_INVALID");
     }
@@ -38017,7 +38496,7 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
     let matchingConsistencyProof = false;
     for (const proof of input.consistency_proofs ?? []) {
       const validation = validateSchema("consistencyProof", proof);
-      const currentCheckpointHash = input.checkpoint ? checkpointHash(input.checkpoint) : void 0;
+      const currentCheckpointHash = input.checkpoint ? checkpointHashForPolicy(input.checkpoint) : void 0;
       const valid = validation.valid && verifyConsistencyProof(proof) && (!currentCheckpointHash || proof.to_checkpoint === currentCheckpointHash);
       if (valid) matchingConsistencyProof = true;
       if (!valid) {
@@ -38039,7 +38518,7 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
       const sparseRequired = policy.require_sparse_merkle_revocation_root === true;
       const sparseShape = Boolean(proof.tree_id && proof.root && proof.root_checkpoint && proof.leaf_index_commitment && proof.leaf_value_commitment && proof.sibling_path?.length);
       const checkpointRootBound = !sparseRequired || Boolean(
-        input.checkpoint && proof.root_checkpoint === checkpointHash(input.checkpoint) && proof.root === input.checkpoint.revocation_root && proof.set_root === input.checkpoint.revocation_root
+        input.checkpoint && proof.root_checkpoint === checkpointHashForPolicy(input.checkpoint) && proof.root === input.checkpoint.revocation_root && proof.set_root === input.checkpoint.revocation_root
       );
       const valid = validation.valid && proof.subject === input.envelope.sender && (!sparseRequired || sparseShape) && checkpointRootBound && verifyNonMembershipProof(proof);
       if (valid) matchedNonMembership = true;
@@ -38088,7 +38567,7 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
       const auditorIdentity = validation.valid ? await resolver.resolveTrustID(finding.auditor, finding.issued_at) : null;
       const auditorKey = auditorIdentity?.verification_methods.find((method) => keyActiveAt(method, finding.issued_at));
       const signatureValid = auditorKey?.type === "ed25519" && verifyEd25519(auditorKey.public_key, auditFindingHash(finding), finding.signature);
-      const expectedCheckpointHash = input.checkpoint ? checkpointHash(input.checkpoint) : void 0;
+      const expectedCheckpointHash = input.checkpoint ? checkpointHashForPolicy(input.checkpoint) : void 0;
       const checkpointMatches = !input.checkpoint || finding.checkpoint_hash !== void 0 && finding.checkpoint_hash === expectedCheckpointHash;
       const valid = validation.valid && auditorAllowed && signatureValid && checkpointMatches && finding.severity !== "critical";
       if (valid) {
@@ -38116,15 +38595,21 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
     } else {
       const relayIdentity = await resolver.resolveTrustID(input.checkpoint.relay_id, input.envelope.timestamp);
       const relayKey = relayIdentity?.verification_methods.find((method) => keyActiveAt(method, input.envelope.timestamp));
-      const unsafeFixtureSignatureAllowed = process.env.ALLOW_UNSAFE_CHECKPOINT_SIGNATURE_FIXTURES === "true";
-      checks.checkpoint_signature_valid = unsafeFixtureSignatureAllowed && input.checkpoint.relay_signature === "0x00" || relayKey?.type === "ed25519" && verifyEd25519(relayKey.public_key, checkpointHash(input.checkpoint), input.checkpoint.relay_signature);
+      const unsafeFixtureSignatureAllowed = process.env.ALLOW_UNSAFE_CHECKPOINT_SIGNATURE_FIXTURES === "true" && !(policy.reject_unsafe_fixtures_on_mainnet && process.env.TSL_NETWORK === "mainnet");
+      checks.checkpoint_signature_valid = unsafeFixtureSignatureAllowed && input.checkpoint.relay_signature === "0x00" || relayKey?.type === "ed25519" && verifyEd25519(relayKey.public_key, checkpointHashForPolicy(input.checkpoint), input.checkpoint.relay_signature);
       if (!checks.checkpoint_signature_valid) {
         errors.push("TSL_CHECKPOINT_SIGNATURE_INVALID");
+      }
+      if (policy.require_authorized_relay) {
+        checks.authorized_relay_valid = Boolean(
+          checks.checkpoint_signature_valid && (!policy.authorized_relays?.length || policy.authorized_relays.includes(input.checkpoint.relay_id))
+        );
+        if (!checks.authorized_relay_valid) errors.push("TSL_RELAY_NOT_AUTHORIZED");
       }
     }
   }
   if (input.proof && input.checkpoint && checks.checkpoint_valid) {
-    checks.checkpoint_matches_proof = input.proof.epoch_start_ms === input.checkpoint.epoch_start_ms && input.proof.epoch_duration_ms === input.checkpoint.epoch_duration_ms && input.proof.shard === input.checkpoint.shard && input.proof.checkpoint_hash === checkpointHash(input.checkpoint) && checkpointRootForKind(input.checkpoint, input.proof.tree_kind) === input.proof.root;
+    checks.checkpoint_matches_proof = input.proof.epoch_start_ms === input.checkpoint.epoch_start_ms && input.proof.epoch_duration_ms === input.checkpoint.epoch_duration_ms && input.proof.shard === input.checkpoint.shard && input.proof.checkpoint_hash === checkpointHashForPolicy(input.checkpoint) && checkpointRootForKind(input.checkpoint, input.proof.tree_kind) === input.proof.root;
     if (checks.checkpoint_matches_proof) explanation.push("Checkpoint root matches inclusion proof");
   }
   if (input.checkpoint && settlementBackend) {
@@ -38155,7 +38640,7 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
   if (policy.require_inclusion && !checks.included_in_log) errors.push("TSL_INCLUSION_INVALID");
   if (policy.require_checkpoint && !checks.checkpoint_matches_proof) errors.push("TSL_CHECKPOINT_INVALID");
   if (policy.require_settlement && !checks.checkpoint_settled) errors.push("TSL_SETTLEMENT_MISSING");
-  const verified = checks.schema_valid && checks.signature_valid && checks.key_found && checks.key_active && checks.not_revoked && checks.content_commitment_matches !== false && checks.disclosure_consent_valid !== false && checks.checkpoint_signature_valid !== false && checks.receipt_valid !== false && checks.attestation_valid !== false && checks.revocation_state_valid !== false && checks.assessment_valid !== false && checks.trust_assessment_v2_valid !== false && checks.scoring_profile_valid !== false && checks.domain_policy_valid !== false && checks.evidence_coverage_valid !== false && checks.metadata_fingerprint_valid !== false && checks.graph_artifacts_valid !== false && checks.sybil_assessment_valid !== false && checks.drift_report_valid !== false && checks.delegated_action_valid !== false && checks.zk_valid !== false && checks.agent_scope_valid !== false && checks.consistency_proof_valid !== false && checks.non_membership_proof_valid !== false && checks.zk_circuit_registered !== false && checks.research_graph_algorithm_valid !== false && checks.provider_governance_valid !== false && checks.seed_governance_valid !== false && checks.full_covariance_drift_valid !== false && checks.governance_policy_valid !== false && checks.audit_consistency_valid !== false && (!policy.require_chain_revocation || checks.chain_revocation_checked === true) && (!policy.require_zk_claims?.length || checks.zk_valid === true) && (!policy.require_agent_scope || checks.agent_scope_valid === true) && (!policy.require_consistency_proof || checks.consistency_proof_valid === true) && (!policy.require_non_membership_proof || checks.non_membership_proof_valid === true) && (!policy.require_registered_zk_circuit || checks.zk_circuit_registered === true) && (!policy.require_research_graph_algorithm || checks.research_graph_algorithm_valid === true) && (!policy.require_provider_governance_active || checks.provider_governance_valid === true) && (!policy.require_seed_governance_opening || checks.seed_governance_valid === true) && (!policy.require_full_covariance_drift || checks.full_covariance_drift_valid === true) && (!policy.require_governance_policy || checks.governance_policy_valid === true) && (!policy.require_audit_consistency || checks.audit_consistency_valid === true) && (!policy.require_v2_assessment || checks.trust_assessment_v2_valid === true) && (!policy.require_metadata_fingerprint_policy || checks.metadata_fingerprint_valid === true) && (!policy.require_graph_artifacts || checks.graph_artifacts_valid === true) && (!policy.require_inclusion || checks.included_in_log) && (!policy.require_checkpoint || checks.checkpoint_matches_proof) && (!policy.require_settlement || checks.checkpoint_settled);
+  const verified = checks.schema_valid && checks.signature_valid && checks.key_found && checks.key_active && checks.not_revoked && checks.content_commitment_matches !== false && checks.disclosure_consent_valid !== false && checks.checkpoint_signature_valid !== false && checks.redaction_manifest_valid !== false && checks.receipt_valid !== false && checks.attestation_valid !== false && checks.revocation_state_valid !== false && checks.assessment_valid !== false && checks.trust_assessment_v2_valid !== false && checks.scoring_profile_valid !== false && checks.domain_policy_valid !== false && checks.evidence_coverage_valid !== false && checks.metadata_fingerprint_valid !== false && checks.graph_artifacts_valid !== false && checks.sybil_assessment_valid !== false && checks.drift_report_valid !== false && checks.delegated_action_valid !== false && checks.zk_valid !== false && checks.agent_scope_valid !== false && checks.consistency_proof_valid !== false && checks.non_membership_proof_valid !== false && checks.zk_circuit_registered !== false && checks.research_graph_algorithm_valid !== false && checks.provider_governance_valid !== false && checks.seed_governance_valid !== false && checks.full_covariance_drift_valid !== false && checks.authorized_relay_valid !== false && checks.governance_policy_valid !== false && checks.audit_consistency_valid !== false && !errors.includes("TSL_UNSAFE_FIXTURE_POLICY_ENABLED") && (!policy.require_chain_revocation || checks.chain_revocation_checked === true) && (!policy.require_zk_claims?.length || checks.zk_valid === true) && (!policy.require_agent_scope || checks.agent_scope_valid === true) && (!policy.require_consistency_proof || checks.consistency_proof_valid === true) && (!policy.require_non_membership_proof || checks.non_membership_proof_valid === true) && (!policy.require_registered_zk_circuit || checks.zk_circuit_registered === true) && (!policy.require_research_graph_algorithm || checks.research_graph_algorithm_valid === true) && (!policy.require_provider_governance_active || checks.provider_governance_valid === true) && (!policy.require_seed_governance_opening || checks.seed_governance_valid === true) && (!policy.require_full_covariance_drift || checks.full_covariance_drift_valid === true) && (!policy.require_authorized_relay || checks.authorized_relay_valid === true) && (!policy.require_receipt_inclusion_for_disclosed_receipts || !input.receipts?.length || checks.receipt_included === true) && (!policy.require_governance_policy || checks.governance_policy_valid === true) && (!policy.require_audit_consistency || checks.audit_consistency_valid === true) && (!policy.require_v2_assessment || checks.trust_assessment_v2_valid === true) && (!policy.require_metadata_fingerprint_policy || checks.metadata_fingerprint_valid === true) && (!policy.require_graph_artifacts || checks.graph_artifacts_valid === true) && (!policy.require_inclusion || checks.included_in_log) && (!policy.require_checkpoint || checks.checkpoint_matches_proof) && (!policy.require_settlement || checks.checkpoint_settled);
   return {
     verified,
     commitment_hash: commitmentHash2,
@@ -61452,10 +61937,10 @@ var wordlists = {
 
 // packages/core-ts/src/settlement.ts
 var CHECKPOINT_REGISTRY_ABI = [
-  "function submitCheckpoint((uint64 epochStartMs,uint32 epochDurationMs,bytes32 shard,bytes32 eventRoot,bytes32 receiptRoot,bytes32 attestationRoot,bytes32 revocationRoot,uint64 eventCount,uint64 receiptCount,bytes32 previousCheckpoint,bytes32 relayId) input, bytes relaySignature) external returns (bytes32)",
-  "function getCheckpointByEpochShard(uint64 epochStartMs, bytes32 shard) external view returns ((uint64 epochStartMs,uint32 epochDurationMs,bytes32 shard,bytes32 eventRoot,bytes32 receiptRoot,bytes32 attestationRoot,bytes32 revocationRoot,uint64 eventCount,uint64 receiptCount,bytes32 previousCheckpoint,bytes32 relayId,uint64 submittedAt))",
+  "function submitCheckpoint((uint64 epochStartMs,uint32 epochDurationMs,bytes32 shard,bytes32 eventRoot,bytes32 receiptRoot,bytes32 attestationRoot,bytes32 revocationRoot,uint64 eventCount,uint64 receiptCount,bytes32 previousCheckpoint,bytes32 relayId,bytes32 settlementBackend) input, bytes relaySignature) external returns (bytes32)",
+  "function getCheckpointByEpochShard(uint64 epochStartMs, bytes32 shard) external view returns ((uint64 epochStartMs,uint32 epochDurationMs,bytes32 shard,bytes32 eventRoot,bytes32 receiptRoot,bytes32 attestationRoot,bytes32 revocationRoot,uint64 eventCount,uint64 receiptCount,bytes32 previousCheckpoint,bytes32 relayId,bytes32 settlementBackend,uint64 submittedAt))",
   "function hasCheckpoint(uint64 epochStartMs, bytes32 shard) external view returns (bool)",
-  "function hashCheckpoint((uint64 epochStartMs,uint32 epochDurationMs,bytes32 shard,bytes32 eventRoot,bytes32 receiptRoot,bytes32 attestationRoot,bytes32 revocationRoot,uint64 eventCount,uint64 receiptCount,bytes32 previousCheckpoint,bytes32 relayId) input) external pure returns (bytes32)"
+  "function hashCheckpoint((uint64 epochStartMs,uint32 epochDurationMs,bytes32 shard,bytes32 eventRoot,bytes32 receiptRoot,bytes32 attestationRoot,bytes32 revocationRoot,uint64 eventCount,uint64 receiptCount,bytes32 previousCheckpoint,bytes32 relayId,bytes32 settlementBackend) input) external pure returns (bytes32)"
 ];
 var TRUST_ID_REGISTRY_ABI = [
   "function register(bytes32 trustId, bytes32 activeKey, bytes32 policyCommitment) external",
@@ -61688,7 +62173,8 @@ function toContractCheckpointInput(checkpoint) {
     eventCount: BigInt(checkpoint.event_count),
     receiptCount: BigInt(checkpoint.receipt_count),
     previousCheckpoint: checkpoint.previous_checkpoint,
-    relayId: relayIdToBytes32(checkpoint.relay_id)
+    relayId: relayIdToBytes32(checkpoint.relay_id),
+    settlementBackend: checkpoint.settlement_backend ? ethers_exports.id(checkpoint.settlement_backend) : ethers_exports.ZeroHash
   };
 }
 function checkpointMismatches(checkpoint, stored) {
@@ -61704,6 +62190,7 @@ function checkpointMismatches(checkpoint, stored) {
   if (stored.eventCount !== expected.eventCount) mismatches.push("event_count");
   if (stored.receiptCount !== expected.receiptCount) mismatches.push("receipt_count");
   if (stored.previousCheckpoint.toLowerCase() !== expected.previousCheckpoint.toLowerCase()) mismatches.push("previous_checkpoint");
+  if (stored.settlementBackend && stored.settlementBackend.toLowerCase() !== expected.settlementBackend.toLowerCase()) mismatches.push("settlement_backend");
   if (stored.relayId.toLowerCase() !== expected.relayId.toLowerCase()) mismatches.push("relay_id");
   return mismatches;
 }
@@ -61714,9 +62201,11 @@ function identityDocuments(bundle) {
 }
 function verificationInput(bundle) {
   return {
+    proof_bundle: bundle,
     envelope: bundle.envelope,
     proof: bundle.proof,
     checkpoint: bundle.checkpoint,
+    redaction_manifest: bundle.redaction_manifest,
     receipts: bundle.receipts,
     attestations: bundle.attestations,
     revocations: bundle.revocations,
