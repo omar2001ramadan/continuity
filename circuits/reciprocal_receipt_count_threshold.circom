@@ -73,6 +73,7 @@ template ReciprocalReceiptCountThreshold(width, n) {
     }
 
     signal diff;
+    reciprocal_receipt_count === valid_sum[width];
     diff <== reciprocal_receipt_count - threshold;
 
     component bits = Num2Bits(n);

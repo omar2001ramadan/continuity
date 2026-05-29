@@ -233,8 +233,7 @@ export function createScoringProvider() {
       const issuer = String(req.body.issuer ?? process.env.TSL_SCORING_PROVIDER_ID ?? "did:tsl:provider:local");
       const callerFeatureOverride =
         req.body.evidence_coverage !== undefined || req.body.normalized_features_bps !== undefined || req.body.weights_bps !== undefined;
-      const allowCallerFeatures =
-        process.env["TSL_" + "DEV_SCORING_INPUTS"] === "true" || req.body.dev_allow_caller_features === true;
+      const allowCallerFeatures = process.env["TSL_" + "DEV_SCORING_INPUTS"] === "true";
       if (callerFeatureOverride && !allowCallerFeatures) {
         res.status(400).json({
           error: {

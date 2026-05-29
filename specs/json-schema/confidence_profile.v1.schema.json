@@ -9,6 +9,9 @@
     "min_width_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
     "max_width_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
     "coverage_weight_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "evidence_weight_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "bootstrap_seed": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "bootstrap_rounds": { "type": "integer", "minimum": 8, "maximum": 256 },
     "method": { "enum": ["analytic_profile_v1", "deterministic_bootstrap_v1", "dev_heuristic_v0"] },
     "issued_at": { "type": "string", "format": "date-time" },
     "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }

@@ -1,0 +1,31 @@
+{
+  "$id": "https://spec.tsl.network/schemas/seed_governance_profile.v1.schema.json",
+  "type": "object",
+  "required": [
+    "type",
+    "profile_id",
+    "issuer",
+    "review_state",
+    "source_class",
+    "seed_class",
+    "seeds",
+    "seed_set_commitment",
+    "governance_policy_commitment",
+    "reviewed_at",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "tsl.seed_governance_profile.v1" },
+    "profile_id": { "type": "string" },
+    "issuer": { "type": "string" },
+    "review_state": { "enum": ["draft", "reviewed", "approved", "rejected", "revoked"] },
+    "source_class": { "enum": ["protocol_reference", "auditor_curated", "provider_curated", "enterprise_private"] },
+    "seed_class": { "enum": ["trusted", "adversarial"] },
+    "seeds": { "type": "array", "items": { "type": "string" } },
+    "seed_set_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "governance_policy_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "reviewed_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string", "pattern": "^0x[0-9a-f]+$" }
+  }
+}

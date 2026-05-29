@@ -33306,6 +33306,12 @@ var DOMAIN_TAGS = {
   MERKLE_LEAF_V1: "tsl.merkle.leaf.v1",
   MERKLE_NODE_V1: "tsl.merkle.node.v1",
   ASSESSMENT_V1: "tsl.trust_assessment.v1",
+  ASSESSMENT_V2: "tsl.trust_assessment.v2",
+  PROOF_BUNDLE_V1: "tsl.proof_bundle.v1",
+  COMMITMENT_V1: "tsl.commitment.v1",
+  COMMITMENT_LEGACY_V1: "tsl.commitment.legacy.v1",
+  DELEGATION_V2: "tsl.delegation_policy.v2",
+  AGENT_ACTION_V2: "tsl.agent_action.v2",
   AGENT_DELEGATION_V1: "tsl.agent_delegation.v1",
   AUDIT_FINDING_V1: "tsl.audit.finding.v1",
   CONSISTENCY_PROOF_V1: "tsl.consistency_proof.v1",
@@ -33404,6 +33410,9 @@ function governancePolicyHash(policy) {
   return hashDomain(DOMAIN_TAGS.GOVERNANCE_POLICY_V1, canonicalBytes(payload));
 }
 function commitmentHashFromParts(eventHashHex, signatureHex) {
+  return hashDomain(DOMAIN_TAGS.COMMITMENT_V1, concatBytes2(hexToBytes2(eventHashHex), hexToBytes2(signatureHex)));
+}
+function legacyCommitmentHashFromParts(eventHashHex, signatureHex) {
   return sha256Hex(concatBytes2(hexToBytes2(eventHashHex), hexToBytes2(signatureHex)));
 }
 function contentCommitment(rawMessage, saltHex) {
@@ -33762,6 +33771,10 @@ var zk_threshold_proof_v1_default = {
     witness_commitment: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
     public_input_hash: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
     proof: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    circuit_id: { type: "string" },
+    verification_key_id: { type: "string" },
+    public_signal_commitment: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    release_manifest_hash: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
     groth16: {
       type: "object",
       required: ["protocol", "curve", "proof", "public_signals"],
@@ -33779,6 +33792,88 @@ var zk_threshold_proof_v1_default = {
       }
     },
     issued_at: { type: "string", format: "date-time" }
+  }
+};
+
+// specs/json-schema/zk_circuit_release_manifest.v1.schema.json
+var zk_circuit_release_manifest_v1_schema_default = {
+  $id: "https://spec.tsl.network/schemas/zk_circuit_release_manifest.v1.schema.json",
+  type: "object",
+  required: [
+    "type",
+    "circuit_id",
+    "claim",
+    "version",
+    "circuit_hash",
+    "r1cs_hash",
+    "wasm_hash",
+    "zkey_hash",
+    "verification_key_id",
+    "verification_key_hash",
+    "ceremony_transcript_hash",
+    "auditor",
+    "reviewer",
+    "status",
+    "issued_at"
+  ],
+  additionalProperties: false,
+  properties: {
+    type: { const: "tsl.zk.circuit_release_manifest.v1" },
+    circuit_id: { type: "string" },
+    claim: {
+      enum: [
+        "identity_age_days",
+        "reciprocal_receipt_count",
+        "organization_membership",
+        "set_membership",
+        "revocation_set_non_membership",
+        "agent_scope_compliance"
+      ]
+    },
+    version: { type: "string" },
+    circuit_hash: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    r1cs_hash: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    wasm_hash: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    zkey_hash: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    verification_key_id: { type: "string" },
+    verification_key_hash: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    verification_key: { type: "object" },
+    ceremony_transcript_hash: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    auditor: { type: "string", pattern: "^did:tsl:" },
+    reviewer: { type: "string", pattern: "^did:tsl:" },
+    status: { enum: ["dev", "candidate", "active", "revoked"] },
+    issued_at: { type: "string", format: "date-time" },
+    signature: { type: "string", pattern: "^0x[0-9a-f]+$" }
+  }
+};
+
+// specs/json-schema/zk_verification_key_registry.v1.schema.json
+var zk_verification_key_registry_v1_schema_default = {
+  $id: "https://spec.tsl.network/schemas/zk_verification_key_registry.v1.schema.json",
+  type: "object",
+  required: [
+    "type",
+    "registry_id",
+    "active_manifest_hashes",
+    "revoked_manifest_hashes",
+    "issued_at"
+  ],
+  additionalProperties: false,
+  properties: {
+    type: { const: "tsl.zk.verification_key_registry.v1" },
+    registry_id: { type: "string" },
+    active_manifest_hashes: {
+      type: "array",
+      items: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+      uniqueItems: true
+    },
+    revoked_manifest_hashes: {
+      type: "array",
+      items: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+      uniqueItems: true
+    },
+    issued_at: { type: "string", format: "date-time" },
+    signature: { type: "string", pattern: "^0x[0-9a-f]+$" }
   }
 };
 
@@ -33934,8 +34029,28 @@ var non_membership_proof_v1_default = {
     subject: { type: "string", pattern: "^did:tsl:" },
     set_root: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
     value_commitment: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    tree_id: { type: "string" },
+    leaf_index_commitment: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    leaf_value_commitment: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    empty_leaf_commitment: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    root: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    root_checkpoint: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
     lower_neighbor: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
     upper_neighbor: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    leaf_index: { type: "integer", minimum: 0 },
+    tree_depth: { type: "integer", minimum: 0 },
+    sibling_path: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["side", "hash"],
+        additionalProperties: false,
+        properties: {
+          side: { enum: ["left", "right"] },
+          hash: { type: "string", pattern: "^0x[0-9a-f]{64}$" }
+        }
+      }
+    },
     proof: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
     issued_at: { type: "string", format: "date-time" }
   }
@@ -34016,10 +34131,84 @@ var proof_bundle_v1_schema_default = {
         type: "object"
       }
     },
+    zk_circuit_manifests: {
+      type: "array",
+      items: {
+        type: "object"
+      }
+    },
+    zk_verification_key_registry: {
+      type: "object"
+    },
     delegations: {
       type: "array",
       items: {
         type: "object"
+      }
+    },
+    delegation_policies: {
+      type: "array",
+      items: {
+        type: "object"
+      }
+    },
+    agent_actions: {
+      type: "array",
+      items: {
+        type: "object"
+      }
+    },
+    disclosure_consents: {
+      type: "array",
+      items: {
+        type: "object"
+      }
+    },
+    message_disclosure: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        raw_message: {
+          type: "string"
+        },
+        content_salt: {
+          type: "string"
+        }
+      }
+    },
+    trusted_seeds: {
+      type: "array",
+      items: { type: "string" }
+    },
+    adversarial_seeds: {
+      type: "array",
+      items: { type: "string" }
+    },
+    trusted_seed_governance: {
+      type: "object"
+    },
+    adversarial_seed_governance: {
+      type: "object"
+    },
+    event_receivers: {
+      type: "object",
+      additionalProperties: { type: "string" }
+    },
+    sybil_profile: {
+      type: "object"
+    },
+    drift_feature_history: {
+      type: "array",
+      items: { type: "object" }
+    },
+    drift_cohort_baseline_components: {
+      type: "array",
+      items: { type: "object" }
+    },
+    local_disclosure_warnings: {
+      type: "array",
+      items: {
+        type: "string"
       }
     },
     audit_findings: {
@@ -34405,9 +34594,14 @@ var evidence_coverage_v1_schema_default = {
     "type",
     "subject",
     "computed_at",
+    "valid_signed_event_count",
+    "valid_receipt_count",
+    "unique_counterparty_count",
+    "distinct_community_count",
+    "attestation_count",
+    "recent_revocation_count",
     "coverage_bps",
-    "required_evidence",
-    "present_evidence",
+    "coverage_label",
     "missing_evidence"
   ],
   additionalProperties: false,
@@ -34423,22 +34617,42 @@ var evidence_coverage_v1_schema_default = {
       type: "string",
       format: "date-time"
     },
+    valid_signed_event_count: {
+      type: "integer",
+      minimum: 0
+    },
+    valid_receipt_count: {
+      type: "integer",
+      minimum: 0
+    },
+    unique_counterparty_count: {
+      type: "integer",
+      minimum: 0
+    },
+    distinct_community_count: {
+      type: "integer",
+      minimum: 0
+    },
+    attestation_count: {
+      type: "integer",
+      minimum: 0
+    },
+    recent_revocation_count: {
+      type: "integer",
+      minimum: 0
+    },
     coverage_bps: {
       type: "integer",
       minimum: 0,
       maximum: 1e4
     },
-    required_evidence: {
-      type: "array",
-      items: {
-        type: "string"
-      }
-    },
-    present_evidence: {
-      type: "array",
-      items: {
-        type: "string"
-      }
+    coverage_label: {
+      enum: [
+        "insufficient",
+        "low",
+        "medium",
+        "high"
+      ]
     },
     missing_evidence: {
       type: "array",
@@ -34475,6 +34689,28 @@ var trust_assessment_v2_schema_default = {
     "signature"
   ],
   additionalProperties: false,
+  allOf: [
+    {
+      if: {
+        properties: {
+          label: {
+            enum: [
+              "cryptographic_failure",
+              "revoked_or_compromised",
+              "settlement_missing",
+              "unsettled_or_unproven",
+              "delegation_missing"
+            ]
+          }
+        }
+      },
+      then: {
+        not: {
+          required: ["score_bps"]
+        }
+      }
+    }
+  ],
   properties: {
     type: {
       const: "tsl.trust_assessment.v2"
@@ -34570,7 +34806,9 @@ var trust_assessment_v2_schema_default = {
         "high_risk",
         "cryptographic_failure",
         "revoked_or_compromised",
-        "settlement_missing"
+        "settlement_missing",
+        "unsettled_or_unproven",
+        "delegation_missing"
       ]
     },
     reason_codes: {
@@ -34690,6 +34928,68 @@ var metadata_fingerprint_commitment_v1_schema_default = {
   }
 };
 
+// specs/json-schema/disclosure_consent.v1.schema.json
+var disclosure_consent_v1_schema_default = {
+  $id: "https://spec.tsl.network/schemas/disclosure_consent.v1.schema.json",
+  type: "object",
+  required: [
+    "type",
+    "subject",
+    "verifier_or_provider",
+    "allowed_field_classes",
+    "forbidden_field_classes",
+    "purpose",
+    "issued_at",
+    "expires_at",
+    "revocation_pointer",
+    "signature"
+  ],
+  additionalProperties: false,
+  properties: {
+    type: { const: "tsl.disclosure_consent.v1" },
+    subject: { type: "string", pattern: "^did:tsl:" },
+    verifier_or_provider: { type: "string", pattern: "^did:tsl:" },
+    allowed_field_classes: {
+      type: "array",
+      items: {
+        enum: [
+          "raw_content",
+          "content_salt",
+          "exact_counterparties",
+          "private_metadata",
+          "local_context",
+          "aggregate_counts",
+          "receipt_thresholds",
+          "attestation_status"
+        ]
+      },
+      uniqueItems: true
+    },
+    forbidden_field_classes: {
+      type: "array",
+      items: {
+        enum: [
+          "raw_content",
+          "content_salt",
+          "exact_counterparties",
+          "private_metadata",
+          "local_context",
+          "protected_attributes",
+          "ip_address",
+          "user_agent",
+          "precise_location"
+        ]
+      },
+      uniqueItems: true
+    },
+    purpose: { type: "string", minLength: 1 },
+    issued_at: { type: "string", format: "date-time" },
+    expires_at: { type: "string", format: "date-time" },
+    revocation_pointer: { type: "string", minLength: 1 },
+    signature: { type: "string", pattern: "^0x[0-9a-f]+$" }
+  }
+};
+
 // specs/json-schema/graph_profile.v2.schema.json
 var graph_profile_v2_schema_default = {
   $id: "https://spec.tsl.network/schemas/graph_profile.v2.schema.json",
@@ -34729,9 +35029,12 @@ var graph_profile_v2_schema_default = {
       properties: {
         algorithm: {
           enum: [
-            "leiden",
-            "louvain",
             "connected_components",
+            "leiden_refinement_v0",
+            "louvain_modularity_v0",
+            "leiden_refinement_v1",
+            "louvain_modularity_v1",
+            "connected_components_v0",
             "none"
           ]
         },
@@ -34747,6 +35050,30 @@ var graph_profile_v2_schema_default = {
           type: "integer",
           minimum: 0,
           maximum: 1e4
+        },
+        deterministic_ordering: {
+          enum: ["node_id_lexicographic"]
+        },
+        max_passes: {
+          type: "integer",
+          minimum: 1,
+          maximum: 100
+        },
+        approximation_tolerance_bps: {
+          type: "integer",
+          minimum: 0,
+          maximum: 1e4
+        },
+        refinement_threshold_bps: {
+          type: "integer",
+          minimum: 0,
+          maximum: 1e4
+        },
+        projection: {
+          enum: ["undirected_sum", "directed_outbound"]
+        },
+        negative_edge_treatment: {
+          enum: ["ignore", "cap", "signed"]
         }
       }
     },
@@ -34765,14 +35092,59 @@ var graph_profile_v2_schema_default = {
         adversarial_seed_commitment: {
           type: "string",
           pattern: "^0x[0-9a-f]{64}$"
+        },
+        trusted_seed_governance_commitment: {
+          type: "string",
+          pattern: "^0x[0-9a-f]{64}$"
+        },
+        adversarial_seed_governance_commitment: {
+          type: "string",
+          pattern: "^0x[0-9a-f]{64}$"
         }
       }
     },
     negative_edge_policy: {
-      type: "string"
+      type: "object",
+      required: [
+        "requires_evidence_commitment",
+        "requires_appeal_uri",
+        "max_single_negative_weight_bps",
+        "decay_days"
+      ],
+      additionalProperties: false,
+      properties: {
+        requires_evidence_commitment: {
+          type: "boolean"
+        },
+        requires_appeal_uri: {
+          type: "boolean"
+        },
+        max_single_negative_weight_bps: {
+          type: "integer",
+          minimum: 0,
+          maximum: 1e4
+        },
+        decay_days: {
+          type: "integer",
+          minimum: 1
+        }
+      }
     },
     privacy_policy: {
-      type: "string"
+      type: "object",
+      required: [
+        "raw_counterparty_upload_required",
+        "allows_pairwise_private_features"
+      ],
+      additionalProperties: false,
+      properties: {
+        raw_counterparty_upload_required: {
+          type: "boolean"
+        },
+        allows_pairwise_private_features: {
+          type: "boolean"
+        }
+      }
     },
     edge_weights: {
       type: "object",
@@ -34780,6 +35152,31 @@ var graph_profile_v2_schema_default = {
         type: "integer",
         minimum: 0,
         maximum: 1e4
+      }
+    },
+    half_life_days: {
+      type: "object",
+      additionalProperties: {
+        type: "integer",
+        minimum: 1
+      }
+    },
+    issuer_quality_bps: {
+      type: "object",
+      additionalProperties: {
+        type: "integer",
+        minimum: 0,
+        maximum: 1e4
+      }
+    },
+    pagerank: {
+      type: "object",
+      required: ["iterations", "damping_bps"],
+      additionalProperties: false,
+      properties: {
+        iterations: { type: "integer", minimum: 1, maximum: 100 },
+        damping_bps: { type: "integer", minimum: 0, maximum: 1e4 },
+        personalization: { enum: ["trusted_seeds", "subject", "uniform"] }
       }
     }
   }
@@ -34853,6 +35250,62 @@ var graph_feature_vector_v1_schema_default = {
       minimum: 0,
       maximum: 1e4
     },
+    community_algorithm_id: {
+      type: "string"
+    },
+    community_escape_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    community_diversity_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    conductance_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    trusted_neighbor_mass_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    trusted_seed_distance_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    adversarial_seed_distance_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    pagerank_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    ppr_lite_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    modularity_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    community_pass_count: {
+      type: "integer",
+      minimum: 0
+    },
+    recomputation_commitment: {
+      type: "string",
+      pattern: "^0x[0-9a-f]{64}$"
+    },
     privacy_disclosure_level: {
       enum: [
         "aggregate_only",
@@ -34875,6 +35328,11 @@ var sybil_assessment_v1_schema_default = {
   required: [
     "type",
     "subject",
+    "issuer",
+    "sybil_profile_id",
+    "graph_profile_id",
+    "seed_set_commitment",
+    "evidence_commitment",
     "cluster_id_commitment",
     "computed_at",
     "adversary_tier_assumed",
@@ -34882,6 +35340,9 @@ var sybil_assessment_v1_schema_default = {
     "trusted_escape_bps",
     "internal_receipt_ratio_bps",
     "attack_cost_minor_units",
+    "cost_components",
+    "expected_benefit_minor_units",
+    "attack_scenario",
     "risk_score_bps",
     "risk_label",
     "privacy_level",
@@ -34895,6 +35356,24 @@ var sybil_assessment_v1_schema_default = {
     subject: {
       type: "string",
       pattern: "^did:tsl:"
+    },
+    issuer: {
+      type: "string",
+      pattern: "^did:tsl:"
+    },
+    sybil_profile_id: {
+      type: "string"
+    },
+    graph_profile_id: {
+      type: "string"
+    },
+    seed_set_commitment: {
+      type: "string",
+      pattern: "^0x[0-9a-f]{64}$"
+    },
+    evidence_commitment: {
+      type: "string",
+      pattern: "^0x[0-9a-f]{64}$"
     },
     cluster_id_commitment: {
       type: "string",
@@ -34947,9 +35426,46 @@ var sybil_assessment_v1_schema_default = {
       minimum: 0,
       maximum: 1e4
     },
+    seed_contamination_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
+    receipt_symmetry_bps: {
+      type: "integer",
+      minimum: 0,
+      maximum: 1e4
+    },
     attack_cost_minor_units: {
       type: "integer",
       minimum: 0
+    },
+    cost_components: {
+      type: "object",
+      required: [
+        "identity_cost_minor_units",
+        "time_aging_cost_minor_units",
+        "external_receipt_cost_minor_units",
+        "attestation_cost_minor_units",
+        "compromise_cost_minor_units",
+        "evasion_cost_minor_units"
+      ],
+      additionalProperties: false,
+      properties: {
+        identity_cost_minor_units: { type: "integer", minimum: 0 },
+        time_aging_cost_minor_units: { type: "integer", minimum: 0 },
+        external_receipt_cost_minor_units: { type: "integer", minimum: 0 },
+        attestation_cost_minor_units: { type: "integer", minimum: 0 },
+        compromise_cost_minor_units: { type: "integer", minimum: 0 },
+        evasion_cost_minor_units: { type: "integer", minimum: 0 }
+      }
+    },
+    expected_benefit_minor_units: {
+      type: "integer",
+      minimum: 0
+    },
+    attack_scenario: {
+      type: "string"
     },
     risk_score_bps: {
       type: "integer",
@@ -35004,6 +35520,9 @@ var drift_report_v1_schema_default = {
       type: "string",
       pattern: "^did:tsl:"
     },
+    drift_profile_id: {
+      type: "string"
+    },
     computed_at: {
       type: "string",
       format: "date-time"
@@ -35015,6 +35534,32 @@ var drift_report_v1_schema_default = {
     observation_window_days: {
       type: "integer",
       minimum: 1
+    },
+    feature_history_commitment: {
+      type: "string",
+      pattern: "^0x[0-9a-f]{64}$"
+    },
+    baseline_profile_commitment: {
+      type: "string",
+      pattern: "^0x[0-9a-f]{64}$"
+    },
+    covariance_profile_commitment: {
+      type: "string",
+      pattern: "^0x[0-9a-f]{64}$"
+    },
+    last_verified_event_at: {
+      type: "string",
+      format: "date-time"
+    },
+    days_since_last_verified_event: {
+      type: "integer",
+      minimum: 0
+    },
+    sparse_mode: {
+      enum: ["none", "insufficient_baseline", "cohort_baseline"]
+    },
+    recomputation_status: {
+      enum: ["not_supplied", "recomputed_match", "recomputed_mismatch", "provider_claim"]
     },
     drift_score_bps: {
       type: "integer",
@@ -35046,6 +35591,19 @@ var drift_report_v1_schema_default = {
         type: "string"
       }
     },
+    component_scores_bps: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        key: { type: "integer", minimum: 0, maximum: 1e4 },
+        graph: { type: "integer", minimum: 0, maximum: 1e4 },
+        action: { type: "integer", minimum: 0, maximum: 1e4 },
+        cadence: { type: "integer", minimum: 0, maximum: 1e4 },
+        claim: { type: "integer", minimum: 0, maximum: 1e4 },
+        agent: { type: "integer", minimum: 0, maximum: 1e4 },
+        local: { type: "integer", minimum: 0, maximum: 1e4 }
+      }
+    },
     signature: {
       type: "string",
       pattern: "^0x[0-9a-f]+$"
@@ -35059,19 +35617,31 @@ var attestation_v2_schema_default = {
   type: "object",
   required: [
     "type",
+    "attestation_id",
     "issuer",
     "subject",
-    "attestation_class",
+    "claim_class",
+    "claim_polarity",
+    "severity",
     "claim_commitment",
+    "evidence_commitment",
+    "evidence_policy",
     "visibility",
+    "appeal_uri",
     "issued_at",
-    "status",
+    "valid_after",
+    "expires_at",
+    "revocation_pointer",
     "signature"
   ],
   additionalProperties: false,
   properties: {
     type: {
       const: "tsl.attestation.v2"
+    },
+    attestation_id: {
+      type: "string",
+      pattern: "^0x[0-9a-f]{64}$"
     },
     issuer: {
       type: "string",
@@ -35081,12 +35651,40 @@ var attestation_v2_schema_default = {
       type: "string",
       pattern: "^did:tsl:"
     },
-    attestation_class: {
+    claim_class: {
       type: "string"
+    },
+    claim_polarity: {
+      enum: [
+        "positive",
+        "negative",
+        "neutral"
+      ]
+    },
+    severity: {
+      enum: [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
     },
     claim_commitment: {
       type: "string",
       pattern: "^0x[0-9a-f]{64}$"
+    },
+    evidence_commitment: {
+      type: "string",
+      pattern: "^0x[0-9a-f]{64}$"
+    },
+    evidence_policy: {
+      enum: [
+        "public",
+        "selective_disclosure_or_auditor_review",
+        "private_commitment",
+        "zk_only"
+      ]
     },
     visibility: {
       enum: [
@@ -35099,24 +35697,30 @@ var attestation_v2_schema_default = {
       type: "string",
       format: "date-time"
     },
+    valid_after: {
+      type: "string",
+      format: "date-time"
+    },
     expires_at: {
       type: "string",
       format: "date-time"
     },
-    status: {
-      enum: [
-        "active",
-        "appealed",
-        "expired",
-        "retracted"
-      ]
+    revocation_pointer: {
+      type: "string"
     },
     appeal_uri: {
       type: "string"
     },
-    evidence_commitment: {
-      type: "string",
-      pattern: "^0x[0-9a-f]{64}$"
+    appeal_status: {
+      enum: [
+        "none",
+        "submitted",
+        "under_review",
+        "upheld",
+        "reversed",
+        "expired",
+        "escalated"
+      ]
     },
     signature: {
       type: "string",
@@ -35138,6 +35742,7 @@ var model_card_v2_schema_default = {
     "feature_registry_commitment",
     "evaluation_report_commitment",
     "privacy_report_commitment",
+    "metrics",
     "limitations",
     "issued_at",
     "signature"
@@ -35174,6 +35779,47 @@ var model_card_v2_schema_default = {
     privacy_report_commitment: {
       type: "string",
       pattern: "^0x[0-9a-f]{64}$"
+    },
+    metrics: {
+      type: "object",
+      required: [
+        "auroc_bps",
+        "auprc_bps",
+        "ece_bps",
+        "p95_latency_ms"
+      ],
+      additionalProperties: false,
+      properties: {
+        auroc_bps: {
+          type: "integer",
+          minimum: 0,
+          maximum: 1e4
+        },
+        auprc_bps: {
+          type: "integer",
+          minimum: 0,
+          maximum: 1e4
+        },
+        ece_bps: {
+          type: "integer",
+          minimum: 0,
+          maximum: 1e4
+        },
+        sparse_identity_false_positive_rate_bps: {
+          type: "integer",
+          minimum: 0,
+          maximum: 1e4
+        },
+        p95_latency_ms: {
+          type: "integer",
+          minimum: 0
+        },
+        appeal_reversal_rate_bps: {
+          type: "integer",
+          minimum: 0,
+          maximum: 1e4
+        }
+      }
     },
     limitations: {
       type: "array",
@@ -35260,7 +35906,7 @@ var evaluation_report_v1_schema_default = {
           minimum: 0,
           maximum: 1e4
         },
-        sparse_identity_false_positive_bps: {
+        sparse_identity_fpr_bps: {
           type: "integer",
           minimum: 0,
           maximum: 1e4
@@ -35475,6 +36121,177 @@ var agent_action_v2_schema_default = {
   }
 };
 
+// specs/json-schema/feature_registry.v1.schema.json
+var feature_registry_v1_schema_default = {
+  $id: "https://spec.tsl.network/schemas/feature_registry.v1.schema.json",
+  type: "object",
+  required: ["type", "registry_id", "feature_ids", "issued_at"],
+  additionalProperties: false,
+  properties: {
+    type: { const: "tsl.feature_registry.v1" },
+    registry_id: { type: "string" },
+    feature_ids: { type: "array", items: { type: "string" }, uniqueItems: true },
+    issued_at: { type: "string", format: "date-time" },
+    signature: { type: "string", pattern: "^0x[0-9a-f]+$" }
+  }
+};
+
+// specs/json-schema/normalization_profile.v1.schema.json
+var normalization_profile_v1_schema_default = {
+  $id: "https://spec.tsl.network/schemas/normalization_profile.v1.schema.json",
+  type: "object",
+  required: ["type", "profile_id", "feature_ranges_bps", "issued_at"],
+  additionalProperties: false,
+  properties: {
+    type: { const: "tsl.normalization_profile.v1" },
+    profile_id: { type: "string" },
+    feature_ranges_bps: {
+      type: "object",
+      additionalProperties: {
+        type: "object",
+        required: ["min_bps", "max_bps", "missing_bps"],
+        additionalProperties: false,
+        properties: {
+          min_bps: { type: "integer", minimum: 0, maximum: 1e4 },
+          max_bps: { type: "integer", minimum: 0, maximum: 1e4 },
+          missing_bps: { type: "integer", minimum: 0, maximum: 1e4 }
+        }
+      }
+    },
+    issued_at: { type: "string", format: "date-time" },
+    signature: { type: "string", pattern: "^0x[0-9a-f]+$" }
+  }
+};
+
+// specs/json-schema/weight_profile.v1.schema.json
+var weight_profile_v1_schema_default = {
+  $id: "https://spec.tsl.network/schemas/weight_profile.v1.schema.json",
+  type: "object",
+  required: ["type", "profile_id", "weights_bps", "issued_at"],
+  additionalProperties: false,
+  properties: {
+    type: { const: "tsl.weight_profile.v1" },
+    profile_id: { type: "string" },
+    weights_bps: {
+      type: "object",
+      additionalProperties: { type: "integer", minimum: 0, maximum: 1e4 }
+    },
+    issued_at: { type: "string", format: "date-time" },
+    signature: { type: "string", pattern: "^0x[0-9a-f]+$" }
+  }
+};
+
+// specs/json-schema/calibration_profile.v1.schema.json
+var calibration_profile_v1_schema_default = {
+  $id: "https://spec.tsl.network/schemas/calibration_profile.v1.schema.json",
+  type: "object",
+  required: ["type", "profile_id", "points", "issued_at"],
+  additionalProperties: false,
+  properties: {
+    type: { const: "tsl.calibration_profile.v1" },
+    profile_id: { type: "string" },
+    points: {
+      type: "array",
+      minItems: 2,
+      items: {
+        type: "object",
+        required: ["raw_bps", "calibrated_bps"],
+        additionalProperties: false,
+        properties: {
+          raw_bps: { type: "integer", minimum: 0, maximum: 1e4 },
+          calibrated_bps: { type: "integer", minimum: 0, maximum: 1e4 }
+        }
+      }
+    },
+    issued_at: { type: "string", format: "date-time" },
+    signature: { type: "string", pattern: "^0x[0-9a-f]+$" }
+  }
+};
+
+// specs/json-schema/confidence_profile.v1.schema.json
+var confidence_profile_v1_schema_default = {
+  $id: "https://spec.tsl.network/schemas/confidence_profile.v1.schema.json",
+  type: "object",
+  required: ["type", "profile_id", "min_width_bps", "max_width_bps", "coverage_weight_bps", "issued_at"],
+  additionalProperties: false,
+  properties: {
+    type: { const: "tsl.confidence_profile.v1" },
+    profile_id: { type: "string" },
+    min_width_bps: { type: "integer", minimum: 0, maximum: 1e4 },
+    max_width_bps: { type: "integer", minimum: 0, maximum: 1e4 },
+    coverage_weight_bps: { type: "integer", minimum: 0, maximum: 1e4 },
+    evidence_weight_bps: { type: "integer", minimum: 0, maximum: 1e4 },
+    bootstrap_seed: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    bootstrap_rounds: { type: "integer", minimum: 8, maximum: 256 },
+    method: { enum: ["analytic_profile_v1", "deterministic_bootstrap_v1", "dev_heuristic_v0"] },
+    issued_at: { type: "string", format: "date-time" },
+    signature: { type: "string", pattern: "^0x[0-9a-f]+$" }
+  }
+};
+
+// specs/json-schema/provider_governance_status.v1.schema.json
+var provider_governance_status_v1_schema_default = {
+  $id: "https://spec.tsl.network/schemas/provider_governance_status.v1.schema.json",
+  type: "object",
+  required: [
+    "type",
+    "provider",
+    "status",
+    "model_registered",
+    "evaluation_report_commitment",
+    "red_team_result",
+    "privacy_leakage_bps",
+    "promotion_gate_result",
+    "issued_at"
+  ],
+  additionalProperties: false,
+  properties: {
+    type: { const: "tsl.provider_governance_status.v1" },
+    provider: { type: "string", pattern: "^did:tsl:" },
+    status: { enum: ["sandbox", "active", "probation", "research_only", "revoked"] },
+    model_registered: { type: "boolean" },
+    evaluation_report_commitment: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    red_team_result: { enum: ["pass", "fail", "not_run"] },
+    privacy_leakage_bps: { type: "integer", minimum: 0, maximum: 1e4 },
+    promotion_gate_result: { enum: ["pass", "fail", "conditional", "research_only"] },
+    issued_at: { type: "string", format: "date-time" },
+    signature: { type: "string", pattern: "^0x[0-9a-f]+$" }
+  }
+};
+
+// specs/json-schema/seed_governance_profile.v1.schema.json
+var seed_governance_profile_v1_schema_default = {
+  $id: "https://spec.tsl.network/schemas/seed_governance_profile.v1.schema.json",
+  type: "object",
+  required: [
+    "type",
+    "profile_id",
+    "issuer",
+    "review_state",
+    "source_class",
+    "seed_class",
+    "seeds",
+    "seed_set_commitment",
+    "governance_policy_commitment",
+    "reviewed_at",
+    "signature"
+  ],
+  additionalProperties: false,
+  properties: {
+    type: { const: "tsl.seed_governance_profile.v1" },
+    profile_id: { type: "string" },
+    issuer: { type: "string" },
+    review_state: { enum: ["draft", "reviewed", "approved", "rejected", "revoked"] },
+    source_class: { enum: ["protocol_reference", "auditor_curated", "provider_curated", "enterprise_private"] },
+    seed_class: { enum: ["trusted", "adversarial"] },
+    seeds: { type: "array", items: { type: "string" } },
+    seed_set_commitment: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    governance_policy_commitment: { type: "string", pattern: "^0x[0-9a-f]{64}$" },
+    reviewed_at: { type: "string", format: "date-time" },
+    signature: { type: "string", pattern: "^0x[0-9a-f]+$" }
+  }
+};
+
 // packages/core-ts/src/schemas.ts
 var schemas = {
   identity: identity_v1_schema_default,
@@ -35486,6 +36303,8 @@ var schemas = {
   inclusionProof: inclusion_proof_v1_schema_default,
   trustAssessment: trust_assessment_v1_default,
   zkThresholdProof: zk_threshold_proof_v1_default,
+  zkCircuitReleaseManifestV1: zk_circuit_release_manifest_v1_schema_default,
+  zkVerificationKeyRegistryV1: zk_verification_key_registry_v1_schema_default,
   agentDelegation: agent_delegation_v1_default,
   auditFinding: audit_finding_v1_default,
   consistencyProof: consistency_proof_v1_default,
@@ -35498,6 +36317,7 @@ var schemas = {
   evidenceCoverageV1: evidence_coverage_v1_schema_default,
   trustAssessmentV2: trust_assessment_v2_schema_default,
   metadataFingerprintCommitmentV1: metadata_fingerprint_commitment_v1_schema_default,
+  disclosureConsentV1: disclosure_consent_v1_schema_default,
   graphProfileV2: graph_profile_v2_schema_default,
   graphFeatureVectorV1: graph_feature_vector_v1_schema_default,
   sybilAssessmentV1: sybil_assessment_v1_schema_default,
@@ -35506,7 +36326,14 @@ var schemas = {
   modelCardV2: model_card_v2_schema_default,
   evaluationReportV1: evaluation_report_v1_schema_default,
   delegationPolicyV2: delegation_policy_v2_schema_default,
-  agentActionV2: agent_action_v2_schema_default
+  agentActionV2: agent_action_v2_schema_default,
+  featureRegistryV1: feature_registry_v1_schema_default,
+  normalizationProfileV1: normalization_profile_v1_schema_default,
+  weightProfileV1: weight_profile_v1_schema_default,
+  calibrationProfileV1: calibration_profile_v1_schema_default,
+  confidenceProfileV1: confidence_profile_v1_schema_default,
+  providerGovernanceStatusV1: provider_governance_status_v1_schema_default,
+  seedGovernanceProfileV1: seed_governance_profile_v1_schema_default
 };
 
 // packages/core-ts/src/validation.ts
@@ -35557,21 +36384,92 @@ function verifyConsistencyProof(proof) {
 }
 
 // packages/core-ts/src/nonMembership.ts
+function sparseHash(label, value) {
+  return hashDomain(DOMAIN_TAGS.NON_MEMBERSHIP_PROOF_V1, canonicalBytes({ label, value }));
+}
+function sparseMerkleZeroHashes(depth) {
+  const zeroes = [sparseHash("zero-leaf", 0)];
+  for (let level = 1; level <= depth; level += 1) {
+    zeroes[level] = sparseHash("node", { left: zeroes[level - 1], right: zeroes[level - 1] });
+  }
+  return zeroes;
+}
+function sparseMerkleLeaf(value) {
+  return sparseHash("leaf", value);
+}
+function sparseMerkleNode(left, right) {
+  return sparseHash("node", { left, right });
+}
 function verifyNonMembershipProof(proof) {
   if (proof.type !== "tsl.zk.non_membership_proof.v1") return false;
   if (proof.claim !== "revocation_set_non_membership") return false;
   if (proof.lower_neighbor && proof.lower_neighbor >= proof.value_commitment) return false;
   if (proof.upper_neighbor && proof.upper_neighbor <= proof.value_commitment) return false;
+  if (proof.tree_id && proof.sibling_path?.length && proof.leaf_index !== void 0 && proof.tree_depth !== void 0 && proof.leaf_index_commitment && proof.leaf_value_commitment && (proof.empty_leaf_commitment || proof.root)) {
+    return verifySparseMerkleProof(proof, proof.root ?? proof.set_root, { tree_id: proof.tree_id, tree_depth: proof.tree_depth });
+  }
+  if (!proof.sibling_path?.length || proof.leaf_index === void 0 || proof.tree_depth === void 0) {
+    return process.env.ALLOW_UNSAFE_NON_MEMBERSHIP_FIXTURES === "true" && proof.proof === hashDomain(
+      DOMAIN_TAGS.NON_MEMBERSHIP_PROOF_V1,
+      canonicalBytes({
+        set_root: proof.set_root,
+        value_commitment: proof.value_commitment,
+        lower: proof.lower_neighbor,
+        upper: proof.upper_neighbor
+      })
+    );
+  }
+  if (proof.sibling_path.length !== proof.tree_depth) return false;
+  let current = hashDomain(
+    DOMAIN_TAGS.NON_MEMBERSHIP_PROOF_V1,
+    canonicalBytes({
+      absent_leaf: proof.value_commitment,
+      lower: proof.lower_neighbor,
+      upper: proof.upper_neighbor,
+      index: proof.leaf_index
+    })
+  );
+  for (const step of proof.sibling_path) {
+    current = step.side === "left" ? hashDomain(DOMAIN_TAGS.NON_MEMBERSHIP_PROOF_V1, canonicalBytes([step.hash, current])) : hashDomain(DOMAIN_TAGS.NON_MEMBERSHIP_PROOF_V1, canonicalBytes([current, step.hash]));
+  }
+  if (current !== proof.set_root) return false;
   const expected = hashDomain(
     DOMAIN_TAGS.NON_MEMBERSHIP_PROOF_V1,
     canonicalBytes({
       set_root: proof.set_root,
       value_commitment: proof.value_commitment,
       lower: proof.lower_neighbor,
-      upper: proof.upper_neighbor
+      upper: proof.upper_neighbor,
+      leaf_index: proof.leaf_index,
+      tree_depth: proof.tree_depth
     })
   );
   return proof.proof === expected;
+}
+function verifySparseMerkleProof(proof, root, profile) {
+  if (proof.tree_id !== profile.tree_id || proof.tree_depth !== profile.tree_depth) return false;
+  if (proof.root && proof.root !== root) return false;
+  if (proof.set_root !== root) return false;
+  if (proof.leaf_index === void 0 || !proof.sibling_path || proof.sibling_path.length !== profile.tree_depth) return false;
+  const expectedIndexCommitment = sparseHash("leaf-index", { tree_id: profile.tree_id, index: proof.leaf_index });
+  if (proof.leaf_index_commitment !== expectedIndexCommitment) return false;
+  const zeroes = sparseMerkleZeroHashes(profile.tree_depth);
+  const isNonMembership = Boolean(proof.empty_leaf_commitment);
+  let current = isNonMembership ? zeroes[0] : sparseMerkleLeaf(proof.value_commitment);
+  if (isNonMembership && proof.empty_leaf_commitment !== zeroes[0]) return false;
+  if (proof.leaf_value_commitment !== sparseMerkleLeaf(proof.value_commitment)) return false;
+  for (const step of proof.sibling_path) {
+    current = step.side === "left" ? sparseMerkleNode(step.hash, current) : sparseMerkleNode(current, step.hash);
+  }
+  if (current !== root) return false;
+  const expectedProof = sparseHash(isNonMembership ? "sparse-merkle-non-membership-proof" : "sparse-merkle-inclusion-proof", {
+    root,
+    value_commitment: proof.value_commitment,
+    leaf_index: proof.leaf_index,
+    tree_depth: profile.tree_depth,
+    sibling_path: proof.sibling_path
+  });
+  return proof.proof === expectedProof;
 }
 
 // packages/core-ts/src/zk.ts
@@ -35582,6 +36480,28 @@ function subjectHashField(subject) {
   const digest = BigInt(sha256Hex(subject));
   const field = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
   return (digest % field).toString();
+}
+function publicSignalCommitment(publicSignals) {
+  return hashDomain(DOMAIN_TAGS.ZK_THRESHOLD_V1, canonicalBytes(publicSignals.map(String)));
+}
+function zkCircuitReleaseManifestHash(manifest) {
+  return hashDomain("tsl.zk.circuit_release_manifest.v1", canonicalBytes(manifest));
+}
+function zkVerificationKeyObjectHash(verificationKey) {
+  return sha256Hex(canonicalBytes(verificationKey));
+}
+function manifestForProof(input) {
+  return input.manifests?.find((manifest) => {
+    const manifestHash = zkCircuitReleaseManifestHash(manifest);
+    return manifest.claim === input.proof.claim && manifest.circuit_id === input.proof.circuit_id && manifest.verification_key_id === input.proof.verification_key_id && manifestHash === input.proof.release_manifest_hash;
+  });
+}
+function zkProofUsesRegisteredCircuit(input) {
+  const manifest = manifestForProof(input);
+  if (!manifest || manifest.status !== "active") return false;
+  const manifestHash = zkCircuitReleaseManifestHash(manifest);
+  if (!input.registry) return false;
+  return input.registry.active_manifest_hashes.includes(manifestHash) && !input.registry.revoked_manifest_hashes.includes(manifestHash);
 }
 function verifyThresholdProof(proof) {
   if (proof.type !== "tsl.zk.threshold_proof.v1") return false;
@@ -35597,17 +36517,29 @@ function verifyThresholdProof(proof) {
   );
   return expectedPublicInputHash === proof.public_input_hash && /^0x[0-9a-f]{64}$/.test(proof.proof);
 }
-async function verifyThresholdProofAsync(proof) {
+async function verifyThresholdProofAsync(proof, options = {}) {
   if (!verifyThresholdProof(proof)) return false;
-  if (!proof.groth16) return true;
+  if (!proof.groth16) return process.env.ALLOW_UNSAFE_ZK_HASH_FIXTURES === "true";
   if (!proof.groth16.verification_key) return false;
-  if (!["identity_age_days", "reciprocal_receipt_count"].includes(proof.claim)) return false;
-  const expectedSubjectHash = subjectHashField(proof.subject);
   const signals = proof.groth16.public_signals.map(String);
-  if (!signals.includes(String(proof.threshold))) return false;
+  if (proof.public_signal_commitment && proof.public_signal_commitment !== publicSignalCommitment(signals)) return false;
+  const manifest = manifestForProof({ proof, manifests: options.manifests });
+  if (options.require_registered_circuit && !zkProofUsesRegisteredCircuit({ proof, manifests: options.manifests, registry: options.registry })) return false;
+  if (options.reject_dev_circuits && manifest?.status !== "active") return false;
+  const requireManifestKeyHash = Boolean(options.require_manifest_verification_key_hash || options.require_registered_circuit || options.reject_dev_circuits);
+  if (requireManifestKeyHash && !manifest?.verification_key) return false;
+  const verificationKey = manifest?.verification_key ?? proof.groth16.verification_key;
+  if (requireManifestKeyHash) {
+    if (!manifest) return false;
+    if (zkVerificationKeyObjectHash(verificationKey) !== manifest.verification_key_hash) return false;
+  }
+  const thresholdClaim = proof.claim === "identity_age_days" || proof.claim === "reciprocal_receipt_count";
+  if (!thresholdClaim && !options.require_registered_circuit) return false;
+  const expectedSubjectHash = subjectHashField(proof.subject);
   if (!signals.includes(expectedSubjectHash)) return false;
+  if (thresholdClaim && !signals.includes(String(proof.threshold))) return false;
   const snarkjs = await loadSnarkJs();
-  return snarkjs.groth16.verify(proof.groth16.verification_key, signals, proof.groth16.proof);
+  return snarkjs.groth16.verify(verificationKey, signals, proof.groth16.proof);
 }
 
 // packages/core-ts/src/v2.ts
@@ -35615,6 +36547,7 @@ var encoder = new TextEncoder();
 var V2_DOMAIN_TAGS = {
   SCORING_PROFILE_V2: "tsl.scoring_profile.v2",
   TRUST_ASSESSMENT_V2: "tsl.trust_assessment.v2",
+  DISCLOSURE_CONSENT_V1: "tsl.disclosure_consent.v1",
   METADATA_FINGERPRINT_V1: "tsl.metadata_fingerprint_commitment.v1",
   GRAPH_FEATURE_VECTOR_V1: "tsl.graph_feature_vector.v1",
   SYBIL_ASSESSMENT_V1: "tsl.sybil_assessment.v1",
@@ -35625,17 +36558,801 @@ var V2_DOMAIN_TAGS = {
 function hashSignedObject(tag, value) {
   return hashDomain(tag, canonicalBytes(withoutSignature(value)));
 }
+function clampBps(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1e4, Math.trunc(value)));
+}
+function bps(part, total) {
+  if (total <= 0) return 0;
+  return clampBps(Math.floor(part * 1e4 / total));
+}
 function scoringProfileV2Hash(profile) {
   return hashSignedObject(V2_DOMAIN_TAGS.SCORING_PROFILE_V2, profile);
 }
 function trustAssessmentV2Hash(assessment) {
   return hashSignedObject(V2_DOMAIN_TAGS.TRUST_ASSESSMENT_V2, assessment);
 }
+function disclosureConsentV1Hash(consent) {
+  return hashSignedObject(V2_DOMAIN_TAGS.DISCLOSURE_CONSENT_V1, consent);
+}
+function constructGraphFromRawEdgesForTestV0(input) {
+  const edges = [...input.edges].sort((a, b2) => a.timestamp.localeCompare(b2.timestamp) || canonicalBytes(a).join(",").localeCompare(canonicalBytes(b2).join(",")));
+  const nodes = [...new Set(edges.flatMap((edge) => [edge.src, edge.dst]))].sort();
+  return { edges, nodes };
+}
+function graphBaseWeightBps(profile, edgeType) {
+  const policy = profile;
+  const configured = policy.edge_weights && policy.edge_weights[edgeType] || (policy.edge_weight_profile && typeof policy.edge_weight_profile === "object" ? policy.edge_weight_profile[edgeType] : void 0);
+  if (typeof configured === "number") return clampBps(configured);
+  if (edgeType === "signed_event") return 1e3;
+  if (edgeType === "received") return 3e3;
+  if (edgeType === "replied") return 5e3;
+  if (edgeType === "transacted" || edgeType === "completed") return 1e4;
+  if (edgeType === "disputed") return 5e3;
+  if (edgeType === "delegation") return 4e3;
+  if (edgeType.includes("attestation")) return 7e3;
+  return 1e3;
+}
+function graphDecayBps(profile, edgeType, timestamp, atTime) {
+  const decay = profile;
+  const halfLifeDays = decay.half_life_days?.[edgeType];
+  if (!halfLifeDays || halfLifeDays <= 0) return 1e4;
+  const ageMs = Math.max(0, Date.parse(atTime) - Date.parse(timestamp));
+  const ageDays = ageMs / 864e5;
+  return clampBps(Math.floor(1e4 * 2 ** (-ageDays / halfLifeDays)));
+}
+function issuerQualityBps(profile, issuer) {
+  const quality = profile;
+  return issuer ? clampBps(quality.issuer_quality_bps?.[issuer] ?? 1e4) : 1e4;
+}
+async function identityHasValidSignature(input) {
+  const document = await input.resolver.resolveTrustID(input.identity, input.timestamp);
+  const key = document ? findVerificationMethod(document, input.signing_key_id) : null;
+  return key?.type === "ed25519" && keyActiveAt(key, input.timestamp) && notRevokedAt(key) && verifyEd25519(key.public_key, input.hash, input.signature);
+}
+async function constructGraphFromEvidenceV0(input) {
+  const edges = [];
+  const eventSenderByCommitment = /* @__PURE__ */ new Map();
+  for (const event of [...input.events ?? []].sort((a, b2) => a.timestamp.localeCompare(b2.timestamp) || eventHash(a).localeCompare(eventHash(b2)))) {
+    const valid = await identityHasValidSignature({
+      identity: event.sender,
+      signing_key_id: event.signing_key_id,
+      timestamp: event.timestamp,
+      resolver: input.resolver,
+      hash: eventHash(event),
+      signature: event.signature
+    });
+    if (!valid) continue;
+    const commitment = hashDomain("tsl.commitment.v1", concatBytes2(hexToBytes2(eventHash(event)), hexToBytes2(event.signature)));
+    eventSenderByCommitment.set(commitment, event.sender);
+    const receiver = input.event_receivers?.[commitment];
+    if (!receiver) continue;
+    edges.push({
+      src: event.sender,
+      dst: receiver,
+      type: "signed_event",
+      timestamp: event.timestamp,
+      weight_bps: graphBaseWeightBps(input.graph_profile, "signed_event"),
+      decay_bps: graphDecayBps(input.graph_profile, "signed_event", event.timestamp, input.at_time)
+    });
+  }
+  for (const receipt of [...input.receipts ?? []].sort((a, b2) => a.timestamp.localeCompare(b2.timestamp) || receiptHash(a).localeCompare(receiptHash(b2)))) {
+    const valid = await identityHasValidSignature({
+      identity: receipt.receiver,
+      signing_key_id: receipt.signing_key_id,
+      timestamp: receipt.timestamp,
+      resolver: input.resolver,
+      hash: receiptHash(receipt),
+      signature: receipt.signature
+    });
+    const sender = eventSenderByCommitment.get(receipt.event_commitment);
+    if (!valid || !sender) continue;
+    edges.push({
+      src: receipt.receiver,
+      dst: sender,
+      type: receipt.receipt_class,
+      timestamp: receipt.timestamp,
+      weight_bps: graphBaseWeightBps(input.graph_profile, receipt.receipt_class),
+      decay_bps: graphDecayBps(input.graph_profile, receipt.receipt_class, receipt.timestamp, input.at_time),
+      receipt_status_bps: receipt.receipt_class === "disputed" ? 5e3 : 1e4
+    });
+  }
+  for (const attestation of [...input.attestations ?? []].sort((a, b2) => a.issued_at.localeCompare(b2.issued_at) || attestationHash(a).localeCompare(attestationHash(b2)))) {
+    const valid = await identityHasValidSignature({
+      identity: attestation.issuer,
+      signing_key_id: "default",
+      timestamp: attestation.issued_at,
+      resolver: input.resolver,
+      hash: attestationHash(attestation),
+      signature: attestation.signature
+    });
+    if (!valid || attestation.expires_at && Date.parse(attestation.expires_at) <= Date.parse(input.at_time)) continue;
+    edges.push({
+      src: attestation.issuer,
+      dst: attestation.subject,
+      type: `attestation:${attestation.attestation_class}`,
+      timestamp: attestation.issued_at,
+      weight_bps: graphBaseWeightBps(input.graph_profile, "attestation"),
+      source_quality_bps: issuerQualityBps(input.graph_profile, attestation.issuer),
+      decay_bps: graphDecayBps(input.graph_profile, "attestation", attestation.issued_at, input.at_time),
+      issuer: attestation.issuer
+    });
+  }
+  for (const policy of [...input.delegation_policies ?? []].sort((a, b2) => a.valid_from.localeCompare(b2.valid_from) || delegationPolicyV2Hash(a).localeCompare(delegationPolicyV2Hash(b2)))) {
+    const document = await input.resolver.resolveTrustID(policy.principal, policy.valid_from);
+    const key = document?.verification_methods.find((method) => method.type === "ed25519" && method.status === "active") ?? null;
+    const valid = key && keyActiveAt(key, policy.valid_from) && notRevokedAt(key) && verifyEd25519(key.public_key, delegationPolicyV2Hash(policy), policy.signature);
+    if (!valid || policy.effect !== "allow" || Date.parse(policy.valid_from) > Date.parse(input.at_time) || Date.parse(policy.valid_until) <= Date.parse(input.at_time)) {
+      continue;
+    }
+    edges.push({
+      src: policy.principal,
+      dst: policy.delegate,
+      type: "delegation",
+      timestamp: policy.valid_from,
+      weight_bps: graphBaseWeightBps(input.graph_profile, "delegation"),
+      decay_bps: 1e4
+    });
+  }
+  return constructGraphFromRawEdgesForTestV0({ edges });
+}
+function isNegativeGraphEdge(edge) {
+  return edge.type === "disputed" || edge.type.includes("negative") || edge.type.includes("scam_warning") || edge.type.includes("revoked") || edge.type.includes("appealed_negative");
+}
+function effectiveWeight(edge, graphProfile) {
+  let value = clampBps(edge.weight_bps);
+  for (const multiplier of [edge.source_quality_bps, edge.decay_bps, edge.receipt_status_bps, edge.appeal_multiplier_bps]) {
+    if (multiplier !== void 0) value = Math.floor(value * clampBps(multiplier) / 1e4);
+  }
+  if (graphProfile && isNegativeGraphEdge(edge)) {
+    value = Math.min(value, clampBps(graphProfile.negative_edge_policy.max_single_negative_weight_bps));
+  }
+  return Math.max(0, value);
+}
+function signedEffectiveWeight(edge, graphProfile) {
+  const weight = effectiveWeight(edge, graphProfile);
+  return isNegativeGraphEdge(edge) ? -weight : weight;
+}
+function connectedComponents(graph, edgeFloorBps = 1e3) {
+  const adjacency = /* @__PURE__ */ new Map();
+  for (const node of graph.nodes) adjacency.set(node, /* @__PURE__ */ new Set());
+  for (const edge of graph.edges) {
+    if (Math.abs(signedEffectiveWeight(edge)) < edgeFloorBps) continue;
+    adjacency.get(edge.src)?.add(edge.dst);
+    adjacency.get(edge.dst)?.add(edge.src);
+  }
+  const components = /* @__PURE__ */ new Map();
+  let componentId = 0;
+  for (const node of [...adjacency.keys()].sort()) {
+    if (components.has(node)) continue;
+    const stack = [node];
+    while (stack.length) {
+      const current = stack.pop();
+      if (components.has(current)) continue;
+      components.set(current, componentId);
+      for (const next of [...adjacency.get(current) ?? []].sort().reverse()) {
+        if (!components.has(next)) stack.push(next);
+      }
+    }
+    componentId += 1;
+  }
+  return components;
+}
+function deterministicWeightedLabelPropagation(graph, graphProfile) {
+  const floor = graphProfile.community_detection.edge_weight_floor_bps ?? 1e3;
+  const maxPasses = graphProfile.community_detection.max_passes ?? 20;
+  const labels = /* @__PURE__ */ new Map();
+  for (const node of [...graph.nodes].sort()) labels.set(node, node);
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    let changed = false;
+    for (const node of [...graph.nodes].sort()) {
+      const labelMass = /* @__PURE__ */ new Map();
+      labelMass.set(labels.get(node) ?? node, 0);
+      for (const edge of graph.edges) {
+        const mass = Math.max(0, signedEffectiveWeight(edge, graphProfile));
+        if (mass < floor) continue;
+        const other = edge.src === node ? edge.dst : edge.dst === node ? edge.src : null;
+        if (!other) continue;
+        const label = labels.get(other) ?? other;
+        labelMass.set(label, (labelMass.get(label) ?? 0) + mass);
+      }
+      const current = labels.get(node) ?? node;
+      const best = [...labelMass.entries()].sort((a, b2) => b2[1] - a[1] || a[0].localeCompare(b2[0]))[0]?.[0] ?? current;
+      if (best !== current) {
+        labels.set(node, best);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  const labelIds = /* @__PURE__ */ new Map();
+  const output3 = /* @__PURE__ */ new Map();
+  for (const node of [...graph.nodes].sort()) {
+    const label = labels.get(node) ?? node;
+    if (!labelIds.has(label)) labelIds.set(label, labelIds.size);
+    output3.set(node, labelIds.get(label));
+  }
+  return output3;
+}
+function deterministicLeidenRefinement(graph, graphProfile) {
+  const coarse = deterministicWeightedLabelPropagation(graph, graphProfile);
+  const floor = graphProfile.community_detection.edge_weight_floor_bps ?? 1e3;
+  const refined = /* @__PURE__ */ new Map();
+  let nextComponent = 0;
+  const coarseGroups = /* @__PURE__ */ new Map();
+  for (const [node, component] of coarse.entries()) {
+    const group = coarseGroups.get(component) ?? [];
+    group.push(node);
+    coarseGroups.set(component, group);
+  }
+  for (const [, nodes] of [...coarseGroups.entries()].sort((a, b2) => Math.min(...a[1].map((n2) => graph.nodes.indexOf(n2))) - Math.min(...b2[1].map((n2) => graph.nodes.indexOf(n2))))) {
+    const subgraphEdges = graph.edges.filter((edge) => nodes.includes(edge.src) && nodes.includes(edge.dst) && Math.max(0, signedEffectiveWeight(edge, graphProfile)) >= floor);
+    const subComponents = connectedComponents({ nodes: [...nodes].sort(), edges: subgraphEdges }, floor);
+    const localIds = [...new Set(subComponents.values())].sort((a, b2) => a - b2);
+    for (const local of localIds) {
+      for (const [node, component] of subComponents.entries()) {
+        if (component === local) refined.set(node, nextComponent);
+      }
+      nextComponent += 1;
+    }
+  }
+  return refined;
+}
+function normalizeCommunityIds(assignments) {
+  const remap = /* @__PURE__ */ new Map();
+  const output3 = /* @__PURE__ */ new Map();
+  for (const node of [...assignments.keys()].sort()) {
+    const current = assignments.get(node);
+    if (!remap.has(current)) remap.set(current, remap.size);
+    output3.set(node, remap.get(current));
+  }
+  return output3;
+}
+function undirectedPositiveMass(graph, graphProfile) {
+  const floor = graphProfile.community_detection.edge_weight_floor_bps ?? 0;
+  const pairMass = /* @__PURE__ */ new Map();
+  for (const edge of graph.edges) {
+    const weight = Math.max(0, signedEffectiveWeight(edge, graphProfile));
+    if (weight < floor || edge.src === edge.dst) continue;
+    const [left, right] = [edge.src, edge.dst].sort();
+    const key = `${left}\0${right}`;
+    pairMass.set(key, (pairMass.get(key) ?? 0) + weight);
+  }
+  return pairMass;
+}
+function modularityBps(graph, graphProfile, assignments) {
+  const pairMass = undirectedPositiveMass(graph, graphProfile);
+  const degree = new Map(graph.nodes.map((node) => [node, 0]));
+  let totalMass = 0;
+  for (const [key, weight] of pairMass.entries()) {
+    const [left, right] = key.split("\0");
+    degree.set(left, (degree.get(left) ?? 0) + weight);
+    degree.set(right, (degree.get(right) ?? 0) + weight);
+    totalMass += weight;
+  }
+  if (totalMass <= 0) return 0;
+  const resolution = clampBps(graphProfile.community_detection.resolution_bps) / 1e4;
+  let q = 0;
+  for (const [key, weight] of pairMass.entries()) {
+    const [left, right] = key.split("\0");
+    if (assignments.get(left) !== assignments.get(right)) continue;
+    q += weight / totalMass - resolution * ((degree.get(left) ?? 0) * (degree.get(right) ?? 0)) / (2 * totalMass * totalMass);
+  }
+  return clampBps(Math.floor(q * 1e4));
+}
+function deterministicLouvainModularityV1(graph, graphProfile) {
+  let assignments = new Map([...graph.nodes].sort().map((node, index) => [node, index]));
+  const maxPasses = graphProfile.community_detection.max_passes ?? 20;
+  const tolerance = graphProfile.community_detection.approximation_tolerance_bps ?? 0;
+  let currentModularity = modularityBps(graph, graphProfile, assignments);
+  let passCount = 0;
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    let changed = false;
+    passCount += 1;
+    for (const node of [...graph.nodes].sort()) {
+      const neighborCommunities = /* @__PURE__ */ new Set([assignments.get(node)]);
+      for (const edge of graph.edges) {
+        const other = edge.src === node ? edge.dst : edge.dst === node ? edge.src : void 0;
+        if (other && assignments.has(other)) neighborCommunities.add(assignments.get(other));
+      }
+      let bestCommunity = assignments.get(node);
+      let bestModularity = currentModularity;
+      for (const candidate of [...neighborCommunities].sort((a, b2) => a - b2)) {
+        const trial = new Map(assignments);
+        trial.set(node, candidate);
+        const trialModularity = modularityBps(graph, graphProfile, trial);
+        if (trialModularity > bestModularity + tolerance || trialModularity === bestModularity && candidate < bestCommunity) {
+          bestCommunity = candidate;
+          bestModularity = trialModularity;
+        }
+      }
+      if (bestCommunity !== assignments.get(node)) {
+        assignments.set(node, bestCommunity);
+        currentModularity = bestModularity;
+        changed = true;
+      }
+    }
+    assignments = normalizeCommunityIds(assignments);
+    currentModularity = modularityBps(graph, graphProfile, assignments);
+    if (!changed) break;
+  }
+  return { assignments, modularity_bps: currentModularity, pass_count: passCount };
+}
+function deterministicLeidenRefinementV1(graph, graphProfile) {
+  const coarse = deterministicLouvainModularityV1(graph, graphProfile);
+  const floor = graphProfile.community_detection.edge_weight_floor_bps ?? 1e3;
+  const refinementThreshold = graphProfile.community_detection.refinement_threshold_bps ?? floor;
+  const refined = /* @__PURE__ */ new Map();
+  let nextCommunity = 0;
+  const groups = /* @__PURE__ */ new Map();
+  for (const [node, community] of coarse.assignments.entries()) {
+    const group = groups.get(community) ?? [];
+    group.push(node);
+    groups.set(community, group);
+  }
+  for (const [, nodes] of [...groups.entries()].sort((a, b2) => a[0] - b2[0])) {
+    const subgraphEdges = graph.edges.filter((edge) => {
+      if (!nodes.includes(edge.src) || !nodes.includes(edge.dst)) return false;
+      return Math.max(0, signedEffectiveWeight(edge, graphProfile)) >= refinementThreshold;
+    });
+    const subComponents = connectedComponents({ nodes: [...nodes].sort(), edges: subgraphEdges }, refinementThreshold);
+    const ids = [...new Set(subComponents.values())].sort((a, b2) => a - b2);
+    for (const id2 of ids) {
+      for (const [node, component] of subComponents.entries()) {
+        if (component === id2) refined.set(node, nextCommunity);
+      }
+      nextCommunity += 1;
+    }
+  }
+  const assignments = normalizeCommunityIds(refined);
+  return {
+    assignments,
+    modularity_bps: modularityBps(graph, graphProfile, assignments),
+    pass_count: coarse.pass_count + 1
+  };
+}
+function communityResult(graph, graphProfile) {
+  const assignments = communityAssignments(graph, graphProfile);
+  if (!graphProfile) return { assignments, modularity_bps: 0, pass_count: 1 };
+  if (graphProfile.community_detection.algorithm === "louvain_modularity_v1") return deterministicLouvainModularityV1(graph, graphProfile);
+  if (graphProfile.community_detection.algorithm === "leiden_refinement_v1") return deterministicLeidenRefinementV1(graph, graphProfile);
+  return { assignments, modularity_bps: modularityBps(graph, graphProfile, assignments), pass_count: 1 };
+}
+function communityAssignments(graph, graphProfile) {
+  if (!graphProfile) return connectedComponents(graph, 1e3);
+  if (graphProfile.community_detection.algorithm === "none") {
+    return new Map([...graph.nodes].sort().map((node, index) => [node, index]));
+  }
+  const algorithm = graphProfile.community_detection.algorithm;
+  const floor = graphProfile.community_detection.edge_weight_floor_bps ?? 1e3;
+  if (algorithm === "connected_components" || algorithm === "connected_components_v0") return connectedComponents(graph, floor);
+  if (algorithm === "louvain_modularity_v0") return deterministicWeightedLabelPropagation(graph, graphProfile);
+  if (algorithm === "leiden_refinement_v0") return deterministicLeidenRefinement(graph, graphProfile);
+  if (algorithm === "louvain_modularity_v1") return deterministicLouvainModularityV1(graph, graphProfile).assignments;
+  if (algorithm === "leiden_refinement_v1") return deterministicLeidenRefinementV1(graph, graphProfile).assignments;
+  return connectedComponents(graph, floor);
+}
+function componentOfSubject(graph, subject, graphProfile) {
+  const components = communityAssignments(graph, graphProfile);
+  const subjectComponent = components.get(subject);
+  if (subjectComponent === void 0) return /* @__PURE__ */ new Set([subject]);
+  return new Set([...components.entries()].filter(([, component]) => component === subjectComponent).map(([node]) => node));
+}
+function shortestSeedDistance(graph, subject, seeds, graphProfile) {
+  if (seeds.has(subject)) return 0;
+  const queue = [{ node: subject, distance: 0 }];
+  const seen = /* @__PURE__ */ new Set([subject]);
+  const floor = graphProfile?.community_detection.edge_weight_floor_bps ?? 1e3;
+  while (queue.length) {
+    const current = queue.shift();
+    for (const edge of graph.edges) {
+      if (Math.abs(signedEffectiveWeight(edge, graphProfile)) < floor) continue;
+      const next = edge.src === current.node ? edge.dst : edge.dst === current.node ? edge.src : null;
+      if (!next || seen.has(next)) continue;
+      if (seeds.has(next)) return current.distance + 1;
+      seen.add(next);
+      queue.push({ node: next, distance: current.distance + 1 });
+    }
+  }
+  return Number.POSITIVE_INFINITY;
+}
+function distanceScoreBps(distance) {
+  if (!Number.isFinite(distance)) return 0;
+  return clampBps(Math.floor(1e4 / (1 + distance)));
+}
+function pageRankScores(graph, graphProfile, trustedSeeds = [], subject) {
+  const nodes = [...graph.nodes].sort();
+  if (!nodes.length) return /* @__PURE__ */ new Map();
+  const iterations = graphProfile?.pagerank?.iterations ?? 20;
+  const damping = clampBps(graphProfile?.pagerank?.damping_bps ?? 8500) / 1e4;
+  const personalization = graphProfile?.pagerank?.personalization ?? "uniform";
+  const trusted = new Set(trustedSeeds);
+  const personalize = /* @__PURE__ */ new Map();
+  const personalizedNodes = personalization === "trusted_seeds" && trusted.size ? nodes.filter((node) => trusted.has(node)) : personalization === "subject" && subject ? [subject] : nodes;
+  for (const node of nodes) personalize.set(node, personalizedNodes.includes(node) ? 1 / personalizedNodes.length : 0);
+  let scores = new Map(nodes.map((node) => [node, 1 / nodes.length]));
+  for (let i = 0; i < iterations; i += 1) {
+    const next = new Map(nodes.map((node) => [node, (1 - damping) * (personalize.get(node) ?? 0)]));
+    for (const src of nodes) {
+      const outgoing = graph.edges.filter((edge) => edge.src === src).map((edge) => [edge, Math.max(0, signedEffectiveWeight(edge, graphProfile))]);
+      const total = outgoing.reduce((sum, [, weight]) => sum + weight, 0);
+      if (total <= 0) {
+        for (const node of nodes) next.set(node, (next.get(node) ?? 0) + damping * (scores.get(src) ?? 0) * (personalize.get(node) ?? 0));
+        continue;
+      }
+      for (const [edge, weight] of outgoing) {
+        next.set(edge.dst, (next.get(edge.dst) ?? 0) + damping * (scores.get(src) ?? 0) * (weight / total));
+      }
+    }
+    scores = next;
+  }
+  return new Map([...scores.entries()].map(([node, score]) => [node, clampBps(Math.floor(score * 1e4))]));
+}
+function computeGraphFeatureVectorV0(input) {
+  const incident = input.graph.edges.filter((edge) => edge.src === input.subject || edge.dst === input.subject);
+  const outbound = /* @__PURE__ */ new Map();
+  const inbound = /* @__PURE__ */ new Map();
+  for (const edge of incident) {
+    const signedWeight = signedEffectiveWeight(edge, input.graph_profile);
+    const weight = Math.max(0, signedWeight);
+    if (edge.src === input.subject) outbound.set(edge.dst, (outbound.get(edge.dst) ?? 0) + weight);
+    if (edge.dst === input.subject) inbound.set(edge.src, (inbound.get(edge.src) ?? 0) + weight);
+  }
+  const counterpartySet = /* @__PURE__ */ new Set([...outbound.keys(), ...inbound.keys()]);
+  const pairMasses = [...counterpartySet].map((counterparty) => (outbound.get(counterparty) ?? 0) + (inbound.get(counterparty) ?? 0));
+  const totalMass = pairMasses.reduce((sum, weight) => sum + weight, 0);
+  const hhi = totalMass === 0 ? 0 : clampBps(Math.floor(pairMasses.reduce((sum, mass) => sum + (mass / totalMass) ** 2, 0) * 1e4));
+  const entropy = totalMass === 0 || counterpartySet.size <= 1 ? 0 : clampBps(
+    Math.floor(
+      -pairMasses.reduce((sum, mass) => {
+        const p = mass / totalMass;
+        return p > 0 ? sum + p * Math.log(p) : sum;
+      }, 0) / Math.log(counterpartySet.size) * 1e4
+    )
+  );
+  const reciprocalNumerator = [...counterpartySet].reduce((sum, counterparty) => sum + 2 * Math.min(outbound.get(counterparty) ?? 0, inbound.get(counterparty) ?? 0), 0);
+  const reciprocalDenominator = [...counterpartySet].reduce((sum, counterparty) => sum + (outbound.get(counterparty) ?? 0) + (inbound.get(counterparty) ?? 0), 0);
+  const seedSet = new Set(input.trusted_seeds ?? []);
+  const adversarialSeedSet = new Set(input.adversarial_seeds ?? []);
+  const seedMass = incident.reduce((sum, edge) => sum + (edge.src === input.subject && seedSet.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
+  const trustedNeighborMass = incident.reduce((sum, edge) => {
+    const neighbor = edge.src === input.subject ? edge.dst : edge.dst === input.subject ? edge.src : void 0;
+    const modelScore = neighbor ? clampBps(input.trusted_neighbor_scores_bps?.[neighbor] ?? (seedSet.has(neighbor) ? 1e4 : 0)) : 0;
+    return sum + Math.floor(Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) * modelScore / 1e4);
+  }, 0);
+  const adversarialMass = incident.reduce((sum, edge) => sum + (adversarialSeedSet.has(edge.src) || adversarialSeedSet.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
+  const communitiesResult = communityResult(input.graph, input.graph_profile);
+  const communities = communitiesResult.assignments;
+  const community = componentOfSubject(input.graph, input.subject, input.graph_profile);
+  const communityTouching = input.graph.edges.filter((edge) => community.has(edge.src) || community.has(edge.dst));
+  const communityMass = communityTouching.reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
+  const communityEscapeMass = communityTouching.reduce(
+    (sum, edge) => sum + (community.has(edge.src) !== community.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0),
+    0
+  );
+  const communityMasses = /* @__PURE__ */ new Map();
+  for (const edge of input.graph.edges) {
+    const srcCommunity = communities.get(edge.src);
+    const dstCommunity = communities.get(edge.dst);
+    const mass = Math.max(0, signedEffectiveWeight(edge, input.graph_profile));
+    if (srcCommunity !== void 0) communityMasses.set(srcCommunity, (communityMasses.get(srcCommunity) ?? 0) + mass);
+    if (dstCommunity !== void 0 && dstCommunity !== srcCommunity) communityMasses.set(dstCommunity, (communityMasses.get(dstCommunity) ?? 0) + mass);
+  }
+  const totalCommunityMass = [...communityMasses.values()].reduce((sum, mass) => sum + mass, 0);
+  const communityHhi = totalCommunityMass === 0 ? 1e4 : Math.floor([...communityMasses.values()].reduce((sum, mass) => sum + (mass / totalCommunityMass) ** 2, 0) * 1e4);
+  const trustedDistance = shortestSeedDistance(input.graph, input.subject, seedSet, input.graph_profile);
+  const adversarialDistance = shortestSeedDistance(input.graph, input.subject, adversarialSeedSet, input.graph_profile);
+  const pagerank = pageRankScores(input.graph, input.graph_profile, input.trusted_seeds, input.subject);
+  const firstHopSeedScore = bps(trustedNeighborMass, totalMass);
+  const secondHopSeedMass = input.graph.edges.reduce((sum, edge) => {
+    if (!counterpartySet.has(edge.src) || !seedSet.has(edge.dst)) return sum;
+    return sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile));
+  }, 0);
+  const pprLite = clampBps(Math.floor(firstHopSeedScore * 0.85 + bps(secondHopSeedMass, Math.max(1, communityMass)) * 0.15));
+  const unsignedVectorBasis = {
+    subject: input.subject,
+    graph_profile_id: input.graph_profile_id,
+    graph_hash: sha256Hex(canonicalBytes(input.graph)),
+    trusted_seed_commitment: sha256Hex(canonicalBytes([...input.trusted_seeds ?? []].sort())),
+    adversarial_seed_commitment: sha256Hex(canonicalBytes([...input.adversarial_seeds ?? []].sort()))
+  };
+  return {
+    type: "tsl.graph_feature_vector.v1",
+    subject: input.subject,
+    graph_profile_id: input.graph_profile_id,
+    computed_at: input.computed_at ?? (/* @__PURE__ */ new Date()).toISOString(),
+    weighted_degree_bps: clampBps(totalMass),
+    reciprocity_bps: bps(reciprocalNumerator, reciprocalDenominator),
+    counterparty_hhi_bps: hhi,
+    counterparty_entropy_bps: entropy,
+    effective_counterparty_count_milli: totalMass === 0 ? 0 : Math.floor(Math.exp(entropy / 1e4 * Math.log(Math.max(1, counterpartySet.size))) * 1e3),
+    seed_escape_bps: bps(seedMass, totalMass),
+    adversarial_proximity_bps: bps(adversarialMass, totalMass),
+    community_algorithm_id: input.graph_profile?.community_detection.algorithm ?? "connected_components_v0",
+    community_escape_bps: bps(communityEscapeMass, communityMass),
+    community_diversity_bps: clampBps(1e4 - communityHhi),
+    conductance_bps: bps(communityEscapeMass, communityMass + communityEscapeMass),
+    trusted_neighbor_mass_bps: bps(trustedNeighborMass, totalMass),
+    trusted_seed_distance_bps: distanceScoreBps(trustedDistance),
+    adversarial_seed_distance_bps: distanceScoreBps(adversarialDistance),
+    pagerank_bps: pagerank.get(input.subject) ?? 0,
+    ppr_lite_bps: pprLite,
+    modularity_bps: communitiesResult.modularity_bps,
+    community_pass_count: communitiesResult.pass_count,
+    recomputation_commitment: sha256Hex(canonicalBytes(unsignedVectorBasis)),
+    privacy_disclosure_level: "aggregate_only",
+    signature: input.signature ?? "0x00"
+  };
+}
 function graphFeatureVectorV1Hash(vector) {
   return hashSignedObject(V2_DOMAIN_TAGS.GRAPH_FEATURE_VECTOR_V1, vector);
 }
+function computeSybilAssessmentV0(input) {
+  const edgeFloor = input.graph_profile.community_detection.edge_weight_floor_bps ?? 1e3;
+  const cluster = componentOfSubject(input.graph, input.subject, input.graph_profile);
+  const trustedSeedSet = new Set(input.trusted_seeds ?? []);
+  const adversarialSeedSet = new Set(input.adversarial_seeds ?? []);
+  const internalEdges = input.graph.edges.filter((edge) => cluster.has(edge.src) && cluster.has(edge.dst));
+  const touchingEdges = input.graph.edges.filter((edge) => cluster.has(edge.src) || cluster.has(edge.dst));
+  const internalMass = internalEdges.reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
+  const touchingMass = touchingEdges.reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
+  const externalEdges = touchingEdges.filter((edge) => !(cluster.has(edge.src) && cluster.has(edge.dst)));
+  const trustedMass = externalEdges.reduce((sum, edge) => sum + (cluster.has(edge.src) && trustedSeedSet.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
+  const adversarialMass = touchingEdges.reduce((sum, edge) => sum + (adversarialSeedSet.has(edge.src) || adversarialSeedSet.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
+  const concentration = bps(internalMass, touchingMass);
+  const trustedEscape = bps(trustedMass, touchingMass);
+  const internalReceiptMass = internalEdges.filter((edge) => edge.type.includes("receipt")).reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
+  const touchingReceiptMass = touchingEdges.filter((edge) => edge.type.includes("receipt")).reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
+  const internalReceiptRatio = bps(internalReceiptMass, touchingReceiptMass);
+  const receiptPairs = /* @__PURE__ */ new Map();
+  for (const edge of internalEdges.filter((candidate) => candidate.type.includes("receipt"))) {
+    const [left, right] = [edge.src, edge.dst].sort();
+    const key = `${left}\0${right}`;
+    const pair = receiptPairs.get(key) ?? { forward: 0, reverse: 0 };
+    if (edge.src === left) pair.forward += Math.max(0, signedEffectiveWeight(edge, input.graph_profile));
+    else pair.reverse += Math.max(0, signedEffectiveWeight(edge, input.graph_profile));
+    receiptPairs.set(key, pair);
+  }
+  const receiptSymmetryNumerator = [...receiptPairs.values()].reduce((sum, pair) => sum + 2 * Math.min(pair.forward, pair.reverse), 0);
+  const receiptSymmetryDenominator = [...receiptPairs.values()].reduce((sum, pair) => sum + pair.forward + pair.reverse, 0);
+  const createdTimes = internalEdges.map((edge) => Date.parse(edge.created_at ?? edge.timestamp)).filter(Number.isFinite);
+  const creationSync = createdTimes.length < 2 ? 0 : clampBps(1e4 - bps(Math.max(...createdTimes) - Math.min(...createdTimes), 1e3 * 60 * 60 * 24 * 30));
+  const issuers = internalEdges.map((edge) => edge.issuer).filter((issuer) => Boolean(issuer));
+  const issuerReuse = issuers.length === 0 ? 0 : bps(
+    Math.max(...[...new Set(issuers)].map((issuer) => issuers.filter((candidate) => candidate === issuer).length)),
+    issuers.length
+  );
+  const externalMassByNode = /* @__PURE__ */ new Map();
+  for (const edge of externalEdges) {
+    const other = cluster.has(edge.src) ? edge.dst : edge.src;
+    externalMassByNode.set(other, (externalMassByNode.get(other) ?? 0) + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)));
+  }
+  const externalMass = [...externalMassByNode.values()].reduce((sum, mass) => sum + mass, 0);
+  const externalHhi = externalMass === 0 ? 1e4 : Math.floor([...externalMassByNode.values()].reduce((sum, mass) => sum + (mass / externalMass) ** 2, 0) * 1e4);
+  const externalDiversity = clampBps(1e4 - externalHhi);
+  const seedContamination = bps(adversarialMass, touchingMass);
+  const receiptSymmetry = bps(receiptSymmetryNumerator, receiptSymmetryDenominator);
+  const risk_score_bps = clampBps(
+    Math.floor(
+      (concentration * 20 + internalReceiptRatio * 12 + receiptSymmetry * 8 + creationSync * 12 + issuerReuse * 10 + seedContamination * 22 + (1e4 - trustedEscape) * 10 + (1e4 - externalDiversity) * 6) / 100
+    )
+  );
+  const minEvidenceMass = input.sybil_profile?.min_evidence_mass ?? 1e3;
+  const risk_label = touchingMass < minEvidenceMass ? "insufficient_evidence" : concentration > 8500 && trustedEscape < 500 ? "high" : seedContamination > 2500 ? "elevated" : risk_score_bps >= 6500 ? "elevated" : internalReceiptRatio > 7500 && trustedEscape < 1500 ? "medium" : "low";
+  const costComponents = {
+    identity_cost_minor_units: cluster.size * (input.sybil_profile?.base_identity_cost_minor_units ?? 25e3),
+    time_aging_cost_minor_units: cluster.size * (input.sybil_profile?.time_aging_cost_minor_units ?? 1e3),
+    external_receipt_cost_minor_units: Math.floor(externalMass / 1e4 * (input.sybil_profile?.external_receipt_cost_minor_units ?? 7500)),
+    attestation_cost_minor_units: internalEdges.filter((edge) => edge.type.includes("attestation")).length * (input.sybil_profile?.attestation_cost_minor_units ?? 1e4),
+    compromise_cost_minor_units: input.sybil_profile?.compromise_cost_minor_units ?? 0,
+    evasion_cost_minor_units: Math.floor(risk_score_bps / 1e4 * (input.sybil_profile?.evasion_cost_minor_units ?? 5e3))
+  };
+  const attackCost = Object.values(costComponents).reduce((sum, value) => sum + value, 0) + Math.floor(internalMass / 1e4) * (input.sybil_profile?.internal_edge_cost_minor_units ?? 5e3);
+  const seedSetCommitment = sha256Hex(
+    canonicalBytes({
+      trusted: [...trustedSeedSet].sort(),
+      adversarial: [...adversarialSeedSet].sort(),
+      graph_profile_id: input.graph_profile.profile_id
+    })
+  );
+  return {
+    type: "tsl.sybil_assessment.v1",
+    subject: input.subject,
+    issuer: input.issuer ?? "did:tsl:provider:reference-sybil",
+    sybil_profile_id: input.sybil_profile?.profile_id ?? "sybil-reference-v0",
+    graph_profile_id: input.graph_profile.profile_id,
+    seed_set_commitment: seedSetCommitment,
+    evidence_commitment: input.evidence_commitment ?? sha256Hex(canonicalBytes({ graph_hash: sha256Hex(canonicalBytes(input.graph)), seed_set_commitment: seedSetCommitment })),
+    cluster_id_commitment: sha256Hex(canonicalBytes({ subject: input.subject, graph_profile_id: input.graph_profile.profile_id })),
+    computed_at: input.computed_at ?? (/* @__PURE__ */ new Date()).toISOString(),
+    adversary_tier_assumed: input.sybil_profile?.adversary_tier ?? "B2",
+    cluster_size_bucket: `${cluster.size}-${cluster.size}`,
+    cluster_concentration_bps: concentration,
+    trusted_escape_bps: trustedEscape,
+    internal_receipt_ratio_bps: internalReceiptRatio,
+    creation_sync_bps: creationSync,
+    issuer_reuse_bps: issuerReuse,
+    external_diversity_bps: externalDiversity,
+    seed_contamination_bps: seedContamination,
+    receipt_symmetry_bps: receiptSymmetry,
+    attack_cost_minor_units: Math.max(0, attackCost),
+    cost_components: costComponents,
+    expected_benefit_minor_units: input.sybil_profile?.expected_benefit_minor_units ?? 0,
+    attack_scenario: input.sybil_profile?.attack_scenario ?? "reference_cluster_assessment",
+    risk_score_bps,
+    risk_label,
+    privacy_level: "cluster_commitment_only",
+    signature: input.signature ?? "0x00"
+  };
+}
 function sybilAssessmentV1Hash(assessment) {
   return hashSignedObject(V2_DOMAIN_TAGS.SYBIL_ASSESSMENT_V1, assessment);
+}
+function invertRegularizedMatrix(matrix, regularization) {
+  const size = matrix.length;
+  if (!size || matrix.some((row) => row.length !== size)) return null;
+  const augmented = matrix.map((row, rowIndex) => [
+    ...row.map((value, columnIndex) => value + (rowIndex === columnIndex ? regularization : 0)),
+    ...Array.from({ length: size }, (_, columnIndex) => columnIndex === rowIndex ? 1 : 0)
+  ]);
+  for (let column = 0; column < size; column += 1) {
+    let pivot = column;
+    for (let row = column + 1; row < size; row += 1) {
+      if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) pivot = row;
+    }
+    if (Math.abs(augmented[pivot][column]) < 1e-9) return null;
+    if (pivot !== column) [augmented[pivot], augmented[column]] = [augmented[column], augmented[pivot]];
+    const pivotValue = augmented[column][column];
+    for (let item = 0; item < size * 2; item += 1) augmented[column][item] /= pivotValue;
+    for (let row = 0; row < size; row += 1) {
+      if (row === column) continue;
+      const factor = augmented[row][column];
+      for (let item = 0; item < size * 2; item += 1) augmented[row][item] -= factor * augmented[column][item];
+    }
+  }
+  return augmented.map((row) => row.slice(size));
+}
+function computeDriftReportV0(input) {
+  if ((input.baseline_values_bps || input.observation_values_bps) && process.env["TSL_DEV_DRIFT_INPUTS"] !== "true") {
+    throw new Error("TSL_DEV_DRIFT_INPUTS_REQUIRED");
+  }
+  const computedAt = input.computed_at ?? (/* @__PURE__ */ new Date()).toISOString();
+  const atMs = Date.parse(computedAt);
+  const componentKeys = ["key", "graph", "action", "cadence", "claim", "agent", "local"];
+  const baselineHistory = (input.feature_history ?? []).filter((point) => {
+    const ms = Date.parse(point.timestamp);
+    return Number.isFinite(ms) && ms >= atMs - (input.baseline_window_days + input.observation_window_days) * 864e5 && ms < atMs - input.observation_window_days * 864e5;
+  });
+  const observationHistory = (input.feature_history ?? []).filter((point) => {
+    const ms = Date.parse(point.timestamp);
+    return Number.isFinite(ms) && ms >= atMs - input.observation_window_days * 864e5 && ms <= atMs;
+  });
+  const baselineValues = input.baseline_values_bps ?? baselineHistory.map((point) => Math.floor(componentKeys.reduce((sum, component) => sum + clampBps(point.components[component] ?? 0), 0) / componentKeys.length));
+  const observationValues = input.observation_values_bps ?? observationHistory.map((point) => Math.floor(componentKeys.reduce((sum, component) => sum + clampBps(point.components[component] ?? 0), 0) / componentKeys.length));
+  if (baselineValues.length < (input.min_baseline_points ?? 2)) {
+    const cohortAvailable = Boolean(input.cohort_baseline_components?.length);
+    if (cohortAvailable && observationHistory.length) {
+      const syntheticHistory = input.cohort_baseline_components.map((components, index) => ({
+        timestamp: new Date(atMs - (input.observation_window_days + index + 1) * 864e5).toISOString(),
+        components
+      }));
+      return computeDriftReportV0({
+        ...input,
+        feature_history: [...syntheticHistory, ...input.feature_history ?? []],
+        cohort_baseline_components: void 0,
+        signature: input.signature
+      });
+    }
+    return {
+      type: "tsl.drift_report.v1",
+      subject: input.subject,
+      ...input.drift_profile_id ? { drift_profile_id: input.drift_profile_id } : {},
+      computed_at: computedAt,
+      baseline_window_days: input.baseline_window_days,
+      observation_window_days: input.observation_window_days,
+      ...input.last_verified_event_at ? { last_verified_event_at: input.last_verified_event_at } : {},
+      sparse_mode: cohortAvailable ? "cohort_baseline" : "insufficient_baseline",
+      recomputation_status: "recomputed_match",
+      drift_score_bps: 0,
+      drift_label: "insufficient_baseline",
+      action: "none",
+      reason_codes: ["INSUFFICIENT_BASELINE"],
+      signature: input.signature ?? "0x00"
+    };
+  }
+  const median = (values) => {
+    const sorted = [...values].map(clampBps).sort((a, b2) => a - b2);
+    return sorted.length % 2 ? sorted[Math.floor(sorted.length / 2)] : Math.floor((sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2);
+  };
+  const robustDistance = (baseline, observation) => {
+    const baselineMedian = median(baseline);
+    const deviations = baseline.map((value) => Math.abs(value - baselineMedian));
+    const mad = Math.max(100, median(deviations));
+    const observationMedian = observation.length ? median(observation) : baselineMedian;
+    return clampBps(Math.floor(Math.abs(observationMedian - baselineMedian) * 1e3 / mad));
+  };
+  const toVector = (point) => componentKeys.map((component) => clampBps(point.components[component] ?? 0));
+  const medianVector = (vectors) => componentKeys.map((_, index) => median(vectors.map((vector) => vector[index] ?? 0)));
+  const covarianceMatrix = (vectors, center) => {
+    const size = componentKeys.length;
+    const matrix = Array.from({ length: size }, () => Array.from({ length: size }, () => 0));
+    const denominator = Math.max(1, vectors.length - 1);
+    for (const vector of vectors) {
+      for (let row = 0; row < size; row += 1) {
+        for (let column = 0; column < size; column += 1) {
+          matrix[row][column] += ((vector[row] ?? 0) - center[row]) * ((vector[column] ?? 0) - center[column]);
+        }
+      }
+    }
+    for (let row = 0; row < size; row += 1) {
+      for (let column = 0; column < size; column += 1) {
+        matrix[row][column] = Math.floor(matrix[row][column] / denominator);
+      }
+      matrix[row][row] = Math.max(matrix[row][row], 1e4);
+    }
+    return matrix;
+  };
+  const robustMahalanobisBps = () => {
+    const baselineVectors = baselineHistory.map(toVector);
+    const observationVectors = observationHistory.map(toVector);
+    if (baselineVectors.length < (input.min_baseline_points ?? 2) || observationVectors.length === 0) return 0;
+    const center = medianVector(baselineVectors);
+    const covariance = covarianceMatrix(baselineVectors, center);
+    const observationMean = componentKeys.map((_, index) => Math.floor(observationVectors.reduce((sum, vector) => sum + (vector[index] ?? 0), 0) / observationVectors.length));
+    const inverse = invertRegularizedMatrix(covariance, 1e4);
+    if (!inverse) return 0;
+    const delta = componentKeys.map((_, index) => observationMean[index] - center[index]);
+    let quadratic = 0;
+    for (let row = 0; row < delta.length; row += 1) {
+      for (let column = 0; column < delta.length; column += 1) {
+        quadratic += delta[row] * inverse[row][column] * delta[column];
+      }
+    }
+    return clampBps(Math.floor(Math.sqrt(Math.max(0, quadratic)) * 1e3));
+  };
+  const derivedComponents = {};
+  for (const component of componentKeys) {
+    const baseline = baselineHistory.map((point) => point.components[component]).filter((value) => typeof value === "number");
+    const observation = observationHistory.map((point) => point.components[component]).filter((value) => typeof value === "number");
+    if (baseline.length >= (input.min_baseline_points ?? 2)) derivedComponents[component] = robustDistance(baseline, observation);
+  }
+  const componentScores = Object.fromEntries(
+    Object.entries({ ...derivedComponents, ...input.component_scores_bps ?? {} }).map(([component, score]) => [component, clampBps(Number(score ?? 0))])
+  );
+  const componentValues = Object.entries(componentScores).map(([component, score]) => [component, clampBps(score ?? 0)]);
+  const componentDrift = componentValues.length ? Math.max(...componentValues.map(([, score]) => score)) : 0;
+  const lastVerifiedEventAt = input.last_verified_event_at ?? [...input.feature_history ?? []].filter((point) => point.verified_event).map((point) => point.timestamp).sort().at(-1);
+  const daysSinceLastVerifiedEvent = lastVerifiedEventAt && Number.isFinite(Date.parse(lastVerifiedEventAt)) ? Math.floor((atMs - Date.parse(lastVerifiedEventAt)) / 864e5) : process.env["TSL_DEV_DRIFT_INPUTS"] === "true" ? input.dormant_days : void 0;
+  const historyHighValue = observationHistory.some((point) => point.high_value_action);
+  const historyNewDelegation = observationHistory.some((point) => point.new_delegation_pattern);
+  const historyAdverse = observationHistory.some((point) => point.adverse_evidence);
+  const drift = Math.max(robustDistance(baselineValues, observationValues), robustMahalanobisBps(), componentDrift);
+  const dormant = (daysSinceLastVerifiedEvent ?? 0) >= (input.dormant_days ?? 90) && (input.high_value_action === true || input.new_delegation_pattern === true || historyHighValue || historyNewDelegation);
+  const severeAdverse = (input.adverse_evidence === true || historyAdverse) && drift >= 7e3;
+  return {
+    type: "tsl.drift_report.v1",
+    subject: input.subject,
+    ...input.drift_profile_id ? { drift_profile_id: input.drift_profile_id } : {},
+    computed_at: computedAt,
+    baseline_window_days: input.baseline_window_days,
+    observation_window_days: input.observation_window_days,
+    feature_history_commitment: input.feature_history ? sha256Hex(canonicalBytes(input.feature_history)) : void 0,
+    baseline_profile_commitment: sha256Hex(canonicalBytes({ baseline_window_days: input.baseline_window_days, min_baseline_points: input.min_baseline_points ?? 2 })),
+    covariance_profile_commitment: sha256Hex(canonicalBytes({ estimator: "robust_median_covariance_diagonal_regularized_v0", regularization: 1e4 })),
+    ...lastVerifiedEventAt ? { last_verified_event_at: lastVerifiedEventAt } : {},
+    ...daysSinceLastVerifiedEvent !== void 0 ? { days_since_last_verified_event: Math.max(0, daysSinceLastVerifiedEvent) } : {},
+    sparse_mode: "none",
+    recomputation_status: "recomputed_match",
+    drift_score_bps: dormant ? Math.max(drift, 8e3) : drift,
+    drift_label: dormant ? "dormant_reactivation" : severeAdverse || drift >= 7e3 ? "severe" : drift >= 4e3 ? "moderate" : drift >= 1500 ? "minor" : "stable",
+    action: dormant ? "step_up" : severeAdverse || drift >= 7e3 ? "human_review" : drift >= 4e3 ? "lower_confidence" : "none",
+    reason_codes: dormant ? ["DORMANT_REACTIVATION", "NEW_HIGH_VALUE_ACTION", ...componentValues.map(([component]) => `DRIFT_${component.toUpperCase()}`)] : [
+      ...input.adverse_evidence ? ["ADVERSE_EVIDENCE"] : [],
+      ...componentValues.filter(([, score]) => score >= 1500).map(([component]) => `DRIFT_${component.toUpperCase()}`)
+    ],
+    component_scores_bps: componentScores,
+    signature: input.signature ?? "0x00"
+  };
 }
 function driftReportV1Hash(report) {
   return hashSignedObject(V2_DOMAIN_TAGS.DRIFT_REPORT_V1, report);
@@ -35652,11 +37369,31 @@ function agentActionV2Hash(action) {
 function resourceMatches(pattern, resource) {
   return pattern === resource || pattern.endsWith("*") && resource.startsWith(pattern.slice(0, -1));
 }
+function actionMatches(actions, action) {
+  return actions.includes(action) || actions.includes("*");
+}
+function policyMatchesAction(policy, action) {
+  return actionMatches(policy.actions, action.action) && policy.resources.some((pattern) => resourceMatches(pattern, action.resource));
+}
+function parametersCommitment(parameters) {
+  return hashDomain("tsl.agent.parameters.v1", canonicalBytes(parameters));
+}
+function valueFromAction(action, parameters) {
+  const fromParams = parameters?.value_minor_units;
+  return Math.max(0, Math.trunc(action.value_minor_units ?? (typeof fromParams === "number" ? fromParams : 0)));
+}
 function verifyDelegatedAgentActionV0(input) {
-  const at = Date.parse(input.at_time ?? input.action.issued_at);
+  const at = Date.parse(input.action.issued_at);
+  if (!Number.isFinite(at)) return { ok: false, error_code: "TSL_TIMESTAMP_INVALID" };
   const agentKey = input.public_keys[input.action.agent];
   if (!agentKey || !verifyEd25519(agentKey, agentActionV2Hash(input.action), input.action.signature)) {
     return { ok: false, error_code: "TSL_AGENT_ACTION_SIGNATURE_INVALID" };
+  }
+  if (input.parameters && parametersCommitment(input.parameters) !== input.action.parameters_commitment) {
+    return { ok: false, error_code: "TSL_DELEGATION_CONSTRAINT_VIOLATION" };
+  }
+  if (input.delegation_chain.length === 0) {
+    return { ok: false, error_code: "TSL_DELEGATION_MISSING" };
   }
   if (input.delegation_chain.length > 0 && input.delegation_chain[0].principal !== input.action.principal) {
     return { ok: false, error_code: "TSL_DELEGATION_CHAIN_BROKEN" };
@@ -35670,10 +37407,17 @@ function verifyDelegatedAgentActionV0(input) {
   const allowedResources = [];
   let maxValue2 = Number.MAX_SAFE_INTEGER;
   let requiresHumanApproval = false;
-  for (const policy of [...input.delegation_chain].reverse()) {
+  let expectedParentPolicyId = null;
+  const revokedIds = new Set(input.revoked_policy_ids ?? []);
+  const revokedPointers = new Set(input.revoked_pointers ?? []);
+  const policiesFromDelegateToPrincipal = [...input.delegation_chain].reverse();
+  for (const [depth, policy] of policiesFromDelegateToPrincipal.entries()) {
     const principalKey = input.public_keys[policy.principal];
     if (!principalKey || !verifyEd25519(principalKey, delegationPolicyV2Hash(policy), policy.signature)) {
       return { ok: false, error_code: "TSL_DELEGATION_SIGNATURE_INVALID" };
+    }
+    if (revokedIds.has(policy.policy_id) || revokedPointers.has(policy.revocation_pointer)) {
+      return { ok: false, error_code: "TSL_DELEGATION_REVOKED" };
     }
     if (Date.parse(policy.valid_from) > at || at >= Date.parse(policy.valid_until)) {
       return { ok: false, error_code: "TSL_DELEGATION_EXPIRED" };
@@ -35681,23 +37425,55 @@ function verifyDelegatedAgentActionV0(input) {
     if (policy.delegate !== expectedDelegate) {
       return { ok: false, error_code: "TSL_DELEGATION_CHAIN_BROKEN" };
     }
-    if (policy.effect !== "allow") {
+    if (expectedParentPolicyId !== null && expectedParentPolicyId !== void 0 && policy.policy_id !== expectedParentPolicyId) {
+      return { ok: false, error_code: "TSL_DELEGATION_CHAIN_BROKEN" };
+    }
+    if (policy.effect === "deny" && policyMatchesAction(policy, input.action)) {
       return { ok: false, error_code: "TSL_DELEGATION_SCOPE_VIOLATION" };
+    }
+    if (policy.effect !== "allow") continue;
+    if (depth > 0) {
+      const subdelegation = policy.subdelegation;
+      if (subdelegation?.allowed !== true) return { ok: false, error_code: "TSL_DELEGATION_SCOPE_VIOLATION" };
+      if (subdelegation?.max_depth !== void 0 && depth > subdelegation.max_depth) return { ok: false, error_code: "TSL_DELEGATION_SCOPE_VIOLATION" };
+      if (subdelegation?.allowed_actions && !actionMatches(subdelegation.allowed_actions, input.action.action)) {
+        return { ok: false, error_code: "TSL_DELEGATION_SCOPE_VIOLATION" };
+      }
     }
     allowedActions.push(policy.actions);
     allowedResources.push(policy.resources);
     const constraints = policy.constraints;
     if (constraints.max_value_minor_units !== void 0) maxValue2 = Math.min(maxValue2, constraints.max_value_minor_units);
     if (constraints.requires_human_approval === true) requiresHumanApproval = true;
+    if (constraints.requires_human_approval_above_minor_units !== void 0 && valueFromAction(input.action, input.parameters) > constraints.requires_human_approval_above_minor_units) {
+      requiresHumanApproval = true;
+    }
+    if (constraints.allowed_tools && (!input.action.tool || !constraints.allowed_tools.includes(input.action.tool))) {
+      return { ok: false, error_code: "TSL_DELEGATION_CONSTRAINT_VIOLATION" };
+    }
+    if (constraints.denied_tools?.includes(input.action.tool ?? "")) {
+      return { ok: false, error_code: "TSL_DELEGATION_CONSTRAINT_VIOLATION" };
+    }
+    if (constraints.currency && input.parameters?.currency !== constraints.currency) {
+      return { ok: false, error_code: "TSL_DELEGATION_CONSTRAINT_VIOLATION" };
+    }
+    const counterpartyCommitment = input.parameters?.counterparty_commitment;
+    if (constraints.allowed_counterparty_commitments && typeof counterpartyCommitment === "string" && !constraints.allowed_counterparty_commitments.includes(counterpartyCommitment)) {
+      return { ok: false, error_code: "TSL_DELEGATION_CONSTRAINT_VIOLATION" };
+    }
+    if (constraints.max_actions_per_window !== void 0 && constraints.observed_actions_in_window !== void 0 && constraints.observed_actions_in_window >= constraints.max_actions_per_window) {
+      return { ok: false, error_code: "TSL_DELEGATION_CONSTRAINT_VIOLATION" };
+    }
+    expectedParentPolicyId = policy.parent_policy_id;
     expectedDelegate = policy.principal;
   }
-  if (allowedActions.some((actions) => !actions.includes(input.action.action))) {
+  if (allowedActions.some((actions) => !actionMatches(actions, input.action.action))) {
     return { ok: false, error_code: "TSL_DELEGATION_SCOPE_VIOLATION" };
   }
   if (allowedResources.some((resources) => !resources.some((pattern) => resourceMatches(pattern, input.action.resource)))) {
     return { ok: false, error_code: "TSL_DELEGATION_SCOPE_VIOLATION" };
   }
-  if ((input.action.value_minor_units ?? 0) > maxValue2) {
+  if (valueFromAction(input.action, input.parameters) > maxValue2) {
     return { ok: false, error_code: "TSL_DELEGATION_VALUE_LIMIT_EXCEEDED" };
   }
   if (requiresHumanApproval && !input.action.human_approval_proof) {
@@ -35727,6 +37503,45 @@ function checkpointRootForKind(checkpoint, kind) {
   if (kind === "attestation") return checkpoint.attestation_root;
   if (kind === "revocation") return checkpoint.revocation_root;
   return void 0;
+}
+async function disclosureConsentAllows(input, fieldClasses, resolver, policy) {
+  const consents = input.disclosure_consents ?? [];
+  const at = Date.parse(input.envelope.timestamp);
+  for (const consent of consents) {
+    const validation = validateSchema("disclosureConsentV1", consent);
+    if (!validation.valid || consent.subject !== input.envelope.sender) continue;
+    if (Date.parse(consent.issued_at) > at || Date.parse(consent.expires_at) <= at) continue;
+    if (policy.verifier_or_provider && consent.verifier_or_provider !== policy.verifier_or_provider) continue;
+    if (policy.disclosure_purpose && consent.purpose !== policy.disclosure_purpose) continue;
+    if (policy.revoked_disclosure_pointers?.includes(consent.revocation_pointer)) continue;
+    const allowed = new Set(consent.allowed_field_classes);
+    const forbidden = new Set(consent.forbidden_field_classes);
+    if (!fieldClasses.every((fieldClass) => allowed.has(fieldClass) && !forbidden.has(fieldClass))) continue;
+    const identity = await resolver.resolveTrustID(consent.subject, consent.issued_at);
+    const consentKey = identity?.verification_methods.find((method) => keyActiveAt(method, consent.issued_at) && notRevokedAt(method));
+    if (consentKey?.type === "ed25519" && verifyEd25519(consentKey.public_key, disclosureConsentV1Hash(consent), consent.signature)) {
+      return true;
+    }
+  }
+  return false;
+}
+function seedGovernanceProfileHash(profile) {
+  const unsigned = { ...profile };
+  delete unsigned.signature;
+  return sha256Hex(canonicalBytes(unsigned));
+}
+async function seedGovernanceProfileValid(input) {
+  const profile = input.profile;
+  if (!profile || profile.seed_class !== input.expectedClass || profile.review_state !== "approved") return false;
+  if (!validateSchema("seedGovernanceProfileV1", profile).valid) return false;
+  const sortedSeeds = [...input.seeds].sort();
+  const seedCommitment = sha256Hex(canonicalBytes(sortedSeeds));
+  if (profile.seed_set_commitment !== seedCommitment || input.expectedSeedCommitment !== seedCommitment) return false;
+  if (input.expectedGovernanceCommitment && input.expectedGovernanceCommitment !== seedGovernanceProfileHash(profile)) return false;
+  if (!profile.signature) return false;
+  const issuerIdentity = await input.resolver.resolveTrustID(profile.issuer, profile.reviewed_at);
+  const issuerKey = issuerIdentity?.verification_methods.find((method) => keyActiveAt(method, profile.reviewed_at) && notRevokedAt(method));
+  return issuerKey?.type === "ed25519" && verifyEd25519(issuerKey.public_key, seedGovernanceProfileHash(profile), profile.signature);
 }
 async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
   const checks = defaultChecks();
@@ -35761,6 +37576,7 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
     checks.signature_valid = verifyEd25519(key.public_key, unsignedEventHash, input.envelope.signature);
   }
   const commitmentHash2 = commitmentHashFromParts(unsignedEventHash, input.envelope.signature);
+  const legacyCommitmentHash = legacyCommitmentHashFromParts(unsignedEventHash, input.envelope.signature);
   if (policy.require_chain_revocation) {
     if (settlementBackend?.isKeyRevokedAt) {
       checks.chain_revocation_checked = true;
@@ -35806,7 +37622,11 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
     if (checks.revocation_state_valid) explanation.push("Signed revocation state is valid");
   }
   if (input.message_disclosure?.raw_message !== void 0 && input.message_disclosure.content_salt) {
-    checks.content_commitment_matches = contentCommitment(input.message_disclosure.raw_message, input.message_disclosure.content_salt) === input.envelope.content_commitment;
+    checks.disclosure_consent_valid = await disclosureConsentAllows(input, ["raw_content", "content_salt"], resolver, policy);
+    if (!checks.disclosure_consent_valid) {
+      errors.push("TSL_DISCLOSURE_CONSENT_MISSING");
+    }
+    checks.content_commitment_matches = checks.disclosure_consent_valid && contentCommitment(input.message_disclosure.raw_message, input.message_disclosure.content_salt) === input.envelope.content_commitment;
     if (checks.content_commitment_matches) {
       explanation.push("Disclosed message matches content commitment");
     }
@@ -35816,7 +37636,7 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
     if (!proofValidation.valid) {
       errors.push("TSL_INCLUSION_INVALID", ...proofValidation.errors);
     } else {
-      checks.included_in_log = input.proof.tree_kind === "event" && input.proof.commitment === commitmentHash2 && verifyInclusion(input.proof);
+      checks.included_in_log = input.proof.tree_kind === "event" && (input.proof.commitment === commitmentHash2 || input.proof.commitment === legacyCommitmentHash) && verifyInclusion(input.proof);
       if (checks.included_in_log) explanation.push("Event included in Merkle log proof");
       if (input.proof.tree_kind === "receipt") checks.receipt_included = verifyInclusion(input.proof);
       if (input.proof.tree_kind === "attestation") checks.attestation_included = verifyInclusion(input.proof);
@@ -35834,7 +37654,7 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
       }
       const receiptIdentity = await resolver.resolveTrustID(receipt.receiver, receipt.timestamp);
       const receiptKey = receiptIdentity ? findVerificationMethod(receiptIdentity, receipt.signing_key_id) : null;
-      const valid = receipt.event_commitment === commitmentHash2 && receiptKey?.type === "ed25519" && keyActiveAt(receiptKey, receipt.timestamp) && verifyEd25519(receiptKey.public_key, receiptHash(receipt), receipt.signature);
+      const valid = (receipt.event_commitment === commitmentHash2 || receipt.event_commitment === legacyCommitmentHash) && receiptKey?.type === "ed25519" && keyActiveAt(receiptKey, receipt.timestamp) && verifyEd25519(receiptKey.public_key, receiptHash(receipt), receipt.signature);
       if (!valid) {
         checks.receipt_valid = false;
         errors.push("TSL_RECEIPT_INVALID");
@@ -35921,20 +37741,35 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
       checks.evidence_coverage_valid = validation.valid;
       if (!checks.evidence_coverage_valid) errors.push("TSL_EVIDENCE_COVERAGE_INVALID", ...validation.errors);
     }
+    if (policy.require_provider_governance_active) {
+      const governance = input.provider_governance_status;
+      const governanceValidation = governance ? validateSchema("providerGovernanceStatusV1", governance) : { valid: false, errors: [] };
+      const expectedProvider = input.scoring_profile?.provider ?? input.assessment_v2?.issuer;
+      checks.provider_governance_valid = Boolean(
+        governance && governanceValidation.valid && governance.provider === expectedProvider && governance.status === "active" && governance.model_registered === true && governance.promotion_gate_result === "pass" && governance.red_team_result === "pass" && governance.privacy_leakage_bps <= 1e3
+      );
+      if (!checks.provider_governance_valid) {
+        errors.push(...governanceValidation.errors);
+        errors.push("TSL_PROVIDER_INACTIVE");
+        if (governance?.model_registered === false) errors.push("TSL_MODEL_NOT_REGISTERED");
+      }
+    }
     if (input.assessment_v2) {
       const validation = validateSchema("trustAssessmentV2", input.assessment_v2);
       const issuerIdentity = validation.valid ? await resolver.resolveTrustID(input.assessment_v2.issuer, input.assessment_v2.issued_at) : null;
       const issuerKey = issuerIdentity?.verification_methods.find((method) => keyActiveAt(method, input.assessment_v2.issued_at));
       const profileMatches = !input.scoring_profile || input.assessment_v2.scoring_profile_id === input.scoring_profile.profile_id;
       const domainMatches = !input.domain_policy || input.assessment_v2.domain === input.domain_policy.domain;
+      const gateMatches = input.assessment_v2.gate_result.schema_valid === checks.schema_valid && input.assessment_v2.gate_result.signature_valid === checks.signature_valid && input.assessment_v2.gate_result.key_active === checks.key_active && input.assessment_v2.gate_result.not_revoked === checks.not_revoked && (input.assessment_v2.gate_result.included_in_log === void 0 || input.assessment_v2.gate_result.included_in_log === checks.included_in_log);
       checks.trust_assessment_v2_valid = Boolean(
-        validation.valid && input.assessment_v2.subject === input.envelope.sender && Date.parse(input.assessment_v2.expires_at) > Date.now() && profileMatches && domainMatches && issuerKey?.type === "ed25519" && verifyEd25519(issuerKey.public_key, trustAssessmentV2Hash(input.assessment_v2), input.assessment_v2.signature)
+        validation.valid && input.assessment_v2.subject === input.envelope.sender && Date.parse(input.assessment_v2.expires_at) > Date.now() && profileMatches && domainMatches && gateMatches && (!input.scoring_profile || input.assessment_v2.issuer === input.scoring_profile.provider) && issuerKey?.type === "ed25519" && verifyEd25519(issuerKey.public_key, trustAssessmentV2Hash(input.assessment_v2), input.assessment_v2.signature)
       );
       if (checks.trust_assessment_v2_valid) {
         explanation.push("Signed v2 trust assessment is valid");
-        riskLabel = input.assessment_v2.label === "cryptographic_failure" || input.assessment_v2.label === "settlement_missing" || input.assessment_v2.label === "revoked_or_compromised" ? "high_risk" : input.assessment_v2.label;
+        riskLabel = input.assessment_v2.label === "cryptographic_failure" || input.assessment_v2.label === "settlement_missing" || input.assessment_v2.label === "unsettled_or_unproven" || input.assessment_v2.label === "delegation_missing" || input.assessment_v2.label === "revoked_or_compromised" ? "high_risk" : input.assessment_v2.label;
       } else {
         errors.push("TSL_TRUST_ASSESSMENT_V2_INVALID", ...validation.errors);
+        if (!gateMatches) errors.push("TSL_ASSESSMENT_GATE_MISMATCH");
       }
     } else if (policy.require_v2_assessment) {
       checks.trust_assessment_v2_valid = false;
@@ -35969,13 +37804,52 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
     if (input.graph_feature_vector) {
       const subjectIdentity = await resolver.resolveTrustID(input.graph_feature_vector.subject, input.graph_feature_vector.computed_at);
       const subjectKey = subjectIdentity?.verification_methods.find((method) => keyActiveAt(method, input.graph_feature_vector.computed_at));
-      checks.graph_artifacts_valid = checks.graph_artifacts_valid && input.graph_feature_vector.subject === input.envelope.sender && subjectKey?.type === "ed25519" && verifyEd25519(subjectKey.public_key, graphFeatureVectorV1Hash(input.graph_feature_vector), input.graph_feature_vector.signature);
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && input.graph_feature_vector.subject === input.envelope.sender && (!policy.require_research_graph_algorithm || input.graph_feature_vector.community_algorithm_id === input.graph_profile?.community_detection.algorithm) && subjectKey?.type === "ed25519" && verifyEd25519(subjectKey.public_key, graphFeatureVectorV1Hash(input.graph_feature_vector), input.graph_feature_vector.signature);
+    }
+    if (policy.require_research_graph_algorithm) {
+      const algorithm = input.graph_profile?.community_detection.algorithm;
+      checks.research_graph_algorithm_valid = algorithm === "louvain_modularity_v1" || algorithm === "leiden_refinement_v1";
+      if (!checks.research_graph_algorithm_valid) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.research_graph_algorithm_valid;
+    }
+    if (policy.require_seed_governance_opening) {
+      const trustedSeeds = [...input.trusted_seeds ?? []].sort();
+      const adversarialSeeds = [...input.adversarial_seeds ?? []].sort();
+      const trustedCommitment = sha256Hex(canonicalBytes(trustedSeeds));
+      const adversarialCommitment = sha256Hex(canonicalBytes(adversarialSeeds));
+      const trustedGovernanceValid = await seedGovernanceProfileValid({
+        profile: input.trusted_seed_governance,
+        expectedClass: "trusted",
+        seeds: trustedSeeds,
+        expectedSeedCommitment: input.graph_profile?.seed_sets.trusted_seed_commitment,
+        expectedGovernanceCommitment: input.graph_profile?.seed_sets.trusted_seed_governance_commitment,
+        resolver
+      });
+      const adversarialGovernanceValid = await seedGovernanceProfileValid({
+        profile: input.adversarial_seed_governance,
+        expectedClass: "adversarial",
+        seeds: adversarialSeeds,
+        expectedSeedCommitment: input.graph_profile?.seed_sets.adversarial_seed_commitment,
+        expectedGovernanceCommitment: input.graph_profile?.seed_sets.adversarial_seed_governance_commitment,
+        resolver
+      });
+      checks.seed_governance_valid = Boolean(
+        input.graph_profile && trustedCommitment === input.graph_profile.seed_sets.trusted_seed_commitment && adversarialCommitment === input.graph_profile.seed_sets.adversarial_seed_commitment && trustedGovernanceValid && adversarialGovernanceValid
+      );
+      if (!checks.seed_governance_valid) errors.push("TSL_SEED_GOVERNANCE_OPENING_INVALID");
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.seed_governance_valid;
     }
     if (input.sybil_assessment) {
-      const subjectIdentity = await resolver.resolveTrustID(input.sybil_assessment.subject, input.sybil_assessment.computed_at);
-      const subjectKey = subjectIdentity?.verification_methods.find((method) => keyActiveAt(method, input.sybil_assessment.computed_at));
+      if (policy.require_sybil_provider_issuer && !input.sybil_assessment.issuer) {
+        checks.sybil_assessment_valid = false;
+        checks.graph_artifacts_valid = false;
+        errors.push("TSL_SYBIL_PROVIDER_ISSUER_REQUIRED");
+      }
+      const issuerOrSubject = input.sybil_assessment.issuer ?? input.sybil_assessment.subject;
+      const issuerIdentity = await resolver.resolveTrustID(issuerOrSubject, input.sybil_assessment.computed_at);
+      const issuerKey = issuerIdentity?.verification_methods.find((method) => keyActiveAt(method, input.sybil_assessment.computed_at));
       checks.sybil_assessment_valid = Boolean(
-        input.sybil_assessment.subject === input.envelope.sender && subjectKey?.type === "ed25519" && verifyEd25519(subjectKey.public_key, sybilAssessmentV1Hash(input.sybil_assessment), input.sybil_assessment.signature)
+        checks.sybil_assessment_valid !== false && input.sybil_assessment.subject === input.envelope.sender && issuerKey?.type === "ed25519" && verifyEd25519(issuerKey.public_key, sybilAssessmentV1Hash(input.sybil_assessment), input.sybil_assessment.signature)
       );
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.sybil_assessment_valid;
     }
@@ -35986,6 +37860,69 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
         input.drift_report.subject === input.envelope.sender && subjectKey?.type === "ed25519" && verifyEd25519(subjectKey.public_key, driftReportV1Hash(input.drift_report), input.drift_report.signature)
       );
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.drift_report_valid;
+    }
+    let evidenceGraph;
+    if (input.graph_profile && (input.graph_feature_vector || input.sybil_assessment)) {
+      evidenceGraph = await constructGraphFromEvidenceV0({
+        events: [input.envelope],
+        receipts: input.receipts,
+        attestations: input.attestations,
+        delegation_policies: input.delegation_policies,
+        resolver,
+        graph_profile: input.graph_profile,
+        at_time: input.graph_feature_vector?.computed_at ?? input.sybil_assessment?.computed_at ?? input.envelope.timestamp,
+        event_receivers: input.event_receivers
+      });
+    }
+    if (input.graph_profile && input.graph_feature_vector && evidenceGraph) {
+      const recomputed = computeGraphFeatureVectorV0({
+        subject: input.graph_feature_vector.subject,
+        graph: evidenceGraph,
+        graph_profile_id: input.graph_profile.profile_id,
+        graph_profile: input.graph_profile,
+        trusted_seeds: input.trusted_seeds,
+        adversarial_seeds: input.adversarial_seeds,
+        computed_at: input.graph_feature_vector.computed_at
+      });
+      const graphMatches = recomputed.weighted_degree_bps === input.graph_feature_vector.weighted_degree_bps && recomputed.reciprocity_bps === input.graph_feature_vector.reciprocity_bps && recomputed.counterparty_hhi_bps === input.graph_feature_vector.counterparty_hhi_bps && recomputed.counterparty_entropy_bps === input.graph_feature_vector.counterparty_entropy_bps && recomputed.effective_counterparty_count_milli === input.graph_feature_vector.effective_counterparty_count_milli && recomputed.seed_escape_bps === input.graph_feature_vector.seed_escape_bps && recomputed.adversarial_proximity_bps === input.graph_feature_vector.adversarial_proximity_bps && recomputed.community_algorithm_id === input.graph_feature_vector.community_algorithm_id && recomputed.community_escape_bps === input.graph_feature_vector.community_escape_bps && recomputed.community_diversity_bps === input.graph_feature_vector.community_diversity_bps && recomputed.conductance_bps === input.graph_feature_vector.conductance_bps && recomputed.trusted_neighbor_mass_bps === input.graph_feature_vector.trusted_neighbor_mass_bps && recomputed.trusted_seed_distance_bps === input.graph_feature_vector.trusted_seed_distance_bps && recomputed.adversarial_seed_distance_bps === input.graph_feature_vector.adversarial_seed_distance_bps && recomputed.pagerank_bps === input.graph_feature_vector.pagerank_bps && recomputed.ppr_lite_bps === input.graph_feature_vector.ppr_lite_bps && recomputed.modularity_bps === input.graph_feature_vector.modularity_bps && recomputed.community_pass_count === input.graph_feature_vector.community_pass_count;
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && graphMatches;
+      if (!graphMatches) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
+    }
+    if (input.sybil_assessment && input.graph_profile && evidenceGraph) {
+      const sybilProfile = input.sybil_profile;
+      const recomputedSybil = computeSybilAssessmentV0({
+        subject: input.sybil_assessment.subject,
+        issuer: input.sybil_assessment.issuer,
+        graph: evidenceGraph,
+        graph_profile: input.graph_profile,
+        trusted_seeds: input.trusted_seeds,
+        adversarial_seeds: input.adversarial_seeds,
+        computed_at: input.sybil_assessment.computed_at,
+        sybil_profile: sybilProfile
+      });
+      const sybilMatches = recomputedSybil.cluster_concentration_bps === input.sybil_assessment.cluster_concentration_bps && recomputedSybil.trusted_escape_bps === input.sybil_assessment.trusted_escape_bps && recomputedSybil.internal_receipt_ratio_bps === input.sybil_assessment.internal_receipt_ratio_bps && recomputedSybil.risk_score_bps === input.sybil_assessment.risk_score_bps && recomputedSybil.risk_label === input.sybil_assessment.risk_label;
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && sybilMatches;
+      if (!sybilMatches) errors.push("TSL_SYBIL_ARTIFACT_INVALID");
+    }
+    if (input.drift_report && input.drift_feature_history) {
+      const recomputedDrift = computeDriftReportV0({
+        subject: input.drift_report.subject,
+        drift_profile_id: input.drift_report.drift_profile_id,
+        feature_history: input.drift_feature_history,
+        baseline_window_days: input.drift_report.baseline_window_days,
+        observation_window_days: input.drift_report.observation_window_days,
+        computed_at: input.drift_report.computed_at,
+        last_verified_event_at: input.drift_report.last_verified_event_at,
+        cohort_baseline_components: input.drift_cohort_baseline_components
+      });
+      const driftMatches = recomputedDrift.drift_score_bps === input.drift_report.drift_score_bps && recomputedDrift.drift_label === input.drift_report.drift_label && recomputedDrift.action === input.drift_report.action && recomputedDrift.feature_history_commitment === input.drift_report.feature_history_commitment && recomputedDrift.covariance_profile_commitment === input.drift_report.covariance_profile_commitment && JSON.stringify(recomputedDrift.component_scores_bps ?? {}) === JSON.stringify(input.drift_report.component_scores_bps ?? {});
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && driftMatches;
+      if (!driftMatches) errors.push("TSL_DRIFT_ARTIFACT_INVALID");
+    }
+    if (policy.require_full_covariance_drift && input.drift_report) {
+      checks.full_covariance_drift_valid = Boolean(input.drift_feature_history?.length && input.drift_report.covariance_profile_commitment && input.drift_report.feature_history_commitment);
+      if (!checks.full_covariance_drift_valid) errors.push("TSL_FULL_COVARIANCE_DRIFT_REQUIRED");
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.full_covariance_drift_valid;
     }
     if (policy.require_graph_artifacts && !checks.graph_artifacts_valid) {
       errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
@@ -36000,8 +37937,15 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
     const validClaims = /* @__PURE__ */ new Set();
     for (const proof of input.zk_proofs ?? []) {
       const validation = validateSchema("zkThresholdProof", proof);
-      const valid = validation.valid && proof.subject === input.envelope.sender && await verifyThresholdProofAsync(proof);
+      const valid = validation.valid && proof.subject === input.envelope.sender && await verifyThresholdProofAsync(proof, {
+        require_registered_circuit: policy.require_registered_zk_circuit,
+        require_manifest_verification_key_hash: policy.require_manifest_verification_key_hash,
+        reject_dev_circuits: policy.reject_dev_zk_circuits,
+        manifests: input.zk_circuit_manifests,
+        registry: input.zk_verification_key_registry
+      });
       if (valid) {
+        if (policy.require_registered_zk_circuit) checks.zk_circuit_registered = true;
         validClaims.add(proof.claim);
       } else {
         checks.zk_valid = false;
@@ -36060,7 +38004,7 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
         action,
         delegation_chain: input.delegation_policies,
         public_keys: publicKeys,
-        at_time: input.envelope.timestamp
+        at_time: action.issued_at
       }) : { ok: false, error_code: "TSL_DELEGATION_POLICY_MISSING" };
       if (!result.ok) {
         checks.delegated_action_valid = false;
@@ -36092,7 +38036,12 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
     let matchedNonMembership = false;
     for (const proof of input.non_membership_proofs ?? []) {
       const validation = validateSchema("nonMembershipProof", proof);
-      const valid = validation.valid && proof.subject === input.envelope.sender && verifyNonMembershipProof(proof);
+      const sparseRequired = policy.require_sparse_merkle_revocation_root === true;
+      const sparseShape = Boolean(proof.tree_id && proof.root && proof.root_checkpoint && proof.leaf_index_commitment && proof.leaf_value_commitment && proof.sibling_path?.length);
+      const checkpointRootBound = !sparseRequired || Boolean(
+        input.checkpoint && proof.root_checkpoint === checkpointHash(input.checkpoint) && proof.root === input.checkpoint.revocation_root && proof.set_root === input.checkpoint.revocation_root
+      );
+      const valid = validation.valid && proof.subject === input.envelope.sender && (!sparseRequired || sparseShape) && checkpointRootBound && verifyNonMembershipProof(proof);
       if (valid) matchedNonMembership = true;
       if (!valid) {
         checks.non_membership_proof_valid = false;
@@ -36164,10 +38113,18 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
     checks.checkpoint_valid = checkpointValidation.valid;
     if (!checkpointValidation.valid) {
       errors.push("TSL_CHECKPOINT_INVALID", ...checkpointValidation.errors);
+    } else {
+      const relayIdentity = await resolver.resolveTrustID(input.checkpoint.relay_id, input.envelope.timestamp);
+      const relayKey = relayIdentity?.verification_methods.find((method) => keyActiveAt(method, input.envelope.timestamp));
+      const unsafeFixtureSignatureAllowed = process.env.ALLOW_UNSAFE_CHECKPOINT_SIGNATURE_FIXTURES === "true";
+      checks.checkpoint_signature_valid = unsafeFixtureSignatureAllowed && input.checkpoint.relay_signature === "0x00" || relayKey?.type === "ed25519" && verifyEd25519(relayKey.public_key, checkpointHash(input.checkpoint), input.checkpoint.relay_signature);
+      if (!checks.checkpoint_signature_valid) {
+        errors.push("TSL_CHECKPOINT_SIGNATURE_INVALID");
+      }
     }
   }
   if (input.proof && input.checkpoint && checks.checkpoint_valid) {
-    checks.checkpoint_matches_proof = input.proof.epoch_start_ms === input.checkpoint.epoch_start_ms && input.proof.epoch_duration_ms === input.checkpoint.epoch_duration_ms && input.proof.shard === input.checkpoint.shard && checkpointRootForKind(input.checkpoint, input.proof.tree_kind) === input.proof.root;
+    checks.checkpoint_matches_proof = input.proof.epoch_start_ms === input.checkpoint.epoch_start_ms && input.proof.epoch_duration_ms === input.checkpoint.epoch_duration_ms && input.proof.shard === input.checkpoint.shard && input.proof.checkpoint_hash === checkpointHash(input.checkpoint) && checkpointRootForKind(input.checkpoint, input.proof.tree_kind) === input.proof.root;
     if (checks.checkpoint_matches_proof) explanation.push("Checkpoint root matches inclusion proof");
   }
   if (input.checkpoint && settlementBackend) {
@@ -36181,6 +38138,15 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
       settlementStatus = settlement.error.includes("MISMATCH") ? "mismatch" : settlement.error.includes("UNAVAILABLE") ? "unavailable" : "pending";
     }
   }
+  if (input.assessment_v2) {
+    const finalGateMatches = (input.assessment_v2.gate_result.checkpoint_valid === void 0 || input.assessment_v2.gate_result.checkpoint_valid === checks.checkpoint_matches_proof) && (input.assessment_v2.gate_result.settlement_satisfied === void 0 || input.assessment_v2.gate_result.settlement_satisfied === checks.checkpoint_settled) && (input.assessment_v2.gate_result.delegation_valid === void 0 || input.assessment_v2.gate_result.delegation_valid === checks.delegated_action_valid);
+    const coverageMatches = !input.evidence_coverage || input.assessment_v2.coverage_bps === input.evidence_coverage.coverage_bps && (!input.assessment_v2.evidence_coverage_commitment || input.assessment_v2.evidence_coverage_commitment === sha256Hex(canonicalBytes(input.evidence_coverage)));
+    if (!finalGateMatches || !coverageMatches) {
+      checks.trust_assessment_v2_valid = false;
+      if (!finalGateMatches) errors.push("TSL_ASSESSMENT_GATE_MISMATCH");
+      if (!coverageMatches) errors.push("TSL_EVIDENCE_COVERAGE_INVALID");
+    }
+  }
   if (!checks.key_found) errors.push("TSL_KEY_NOT_FOUND");
   if (checks.key_found && !checks.key_active) errors.push("TSL_KEY_INACTIVE");
   if (!checks.not_revoked) errors.push("TSL_KEY_REVOKED");
@@ -36189,7 +38155,7 @@ async function verifyTSL(input, resolver, policy = {}, settlementBackend) {
   if (policy.require_inclusion && !checks.included_in_log) errors.push("TSL_INCLUSION_INVALID");
   if (policy.require_checkpoint && !checks.checkpoint_matches_proof) errors.push("TSL_CHECKPOINT_INVALID");
   if (policy.require_settlement && !checks.checkpoint_settled) errors.push("TSL_SETTLEMENT_MISSING");
-  const verified = checks.schema_valid && checks.signature_valid && checks.key_found && checks.key_active && checks.not_revoked && checks.content_commitment_matches !== false && checks.receipt_valid !== false && checks.attestation_valid !== false && checks.revocation_state_valid !== false && checks.assessment_valid !== false && checks.trust_assessment_v2_valid !== false && checks.scoring_profile_valid !== false && checks.domain_policy_valid !== false && checks.evidence_coverage_valid !== false && checks.metadata_fingerprint_valid !== false && checks.graph_artifacts_valid !== false && checks.sybil_assessment_valid !== false && checks.drift_report_valid !== false && checks.delegated_action_valid !== false && checks.zk_valid !== false && checks.agent_scope_valid !== false && checks.consistency_proof_valid !== false && checks.non_membership_proof_valid !== false && checks.governance_policy_valid !== false && checks.audit_consistency_valid !== false && (!policy.require_chain_revocation || checks.chain_revocation_checked === true) && (!policy.require_zk_claims?.length || checks.zk_valid === true) && (!policy.require_agent_scope || checks.agent_scope_valid === true) && (!policy.require_consistency_proof || checks.consistency_proof_valid === true) && (!policy.require_non_membership_proof || checks.non_membership_proof_valid === true) && (!policy.require_governance_policy || checks.governance_policy_valid === true) && (!policy.require_audit_consistency || checks.audit_consistency_valid === true) && (!policy.require_v2_assessment || checks.trust_assessment_v2_valid === true) && (!policy.require_metadata_fingerprint_policy || checks.metadata_fingerprint_valid === true) && (!policy.require_graph_artifacts || checks.graph_artifacts_valid === true) && (!policy.require_inclusion || checks.included_in_log) && (!policy.require_checkpoint || checks.checkpoint_matches_proof) && (!policy.require_settlement || checks.checkpoint_settled);
+  const verified = checks.schema_valid && checks.signature_valid && checks.key_found && checks.key_active && checks.not_revoked && checks.content_commitment_matches !== false && checks.disclosure_consent_valid !== false && checks.checkpoint_signature_valid !== false && checks.receipt_valid !== false && checks.attestation_valid !== false && checks.revocation_state_valid !== false && checks.assessment_valid !== false && checks.trust_assessment_v2_valid !== false && checks.scoring_profile_valid !== false && checks.domain_policy_valid !== false && checks.evidence_coverage_valid !== false && checks.metadata_fingerprint_valid !== false && checks.graph_artifacts_valid !== false && checks.sybil_assessment_valid !== false && checks.drift_report_valid !== false && checks.delegated_action_valid !== false && checks.zk_valid !== false && checks.agent_scope_valid !== false && checks.consistency_proof_valid !== false && checks.non_membership_proof_valid !== false && checks.zk_circuit_registered !== false && checks.research_graph_algorithm_valid !== false && checks.provider_governance_valid !== false && checks.seed_governance_valid !== false && checks.full_covariance_drift_valid !== false && checks.governance_policy_valid !== false && checks.audit_consistency_valid !== false && (!policy.require_chain_revocation || checks.chain_revocation_checked === true) && (!policy.require_zk_claims?.length || checks.zk_valid === true) && (!policy.require_agent_scope || checks.agent_scope_valid === true) && (!policy.require_consistency_proof || checks.consistency_proof_valid === true) && (!policy.require_non_membership_proof || checks.non_membership_proof_valid === true) && (!policy.require_registered_zk_circuit || checks.zk_circuit_registered === true) && (!policy.require_research_graph_algorithm || checks.research_graph_algorithm_valid === true) && (!policy.require_provider_governance_active || checks.provider_governance_valid === true) && (!policy.require_seed_governance_opening || checks.seed_governance_valid === true) && (!policy.require_full_covariance_drift || checks.full_covariance_drift_valid === true) && (!policy.require_governance_policy || checks.governance_policy_valid === true) && (!policy.require_audit_consistency || checks.audit_consistency_valid === true) && (!policy.require_v2_assessment || checks.trust_assessment_v2_valid === true) && (!policy.require_metadata_fingerprint_policy || checks.metadata_fingerprint_valid === true) && (!policy.require_graph_artifacts || checks.graph_artifacts_valid === true) && (!policy.require_inclusion || checks.included_in_log) && (!policy.require_checkpoint || checks.checkpoint_matches_proof) && (!policy.require_settlement || checks.checkpoint_settled);
   return {
     verified,
     commitment_hash: commitmentHash2,
@@ -59762,9 +61728,19 @@ function verificationInput(bundle) {
     metadata_fingerprints: bundle.metadata_fingerprints,
     graph_profile: bundle.graph_profile,
     graph_feature_vector: bundle.graph_feature_vector,
+    trusted_seeds: bundle.trusted_seeds,
+    adversarial_seeds: bundle.adversarial_seeds,
+    trusted_seed_governance: bundle.trusted_seed_governance,
+    adversarial_seed_governance: bundle.adversarial_seed_governance,
+    event_receivers: bundle.event_receivers,
     sybil_assessment: bundle.sybil_assessment,
+    sybil_profile: bundle.sybil_profile,
     drift_report: bundle.drift_report,
+    drift_feature_history: bundle.drift_feature_history,
+    drift_cohort_baseline_components: bundle.drift_cohort_baseline_components,
     zk_proofs: bundle.zk_proofs,
+    zk_circuit_manifests: bundle.zk_circuit_manifests,
+    zk_verification_key_registry: bundle.zk_verification_key_registry,
     delegations: bundle.delegations,
     delegation_policies: bundle.delegation_policies,
     agent_actions: bundle.agent_actions,
@@ -59772,7 +61748,8 @@ function verificationInput(bundle) {
     consistency_proofs: bundle.consistency_proofs,
     non_membership_proofs: bundle.non_membership_proofs,
     governance_policy: bundle.governance_policy,
-    message_disclosure: bundle.message_disclosure
+    message_disclosure: bundle.message_disclosure,
+    disclosure_consents: bundle.disclosure_consents
   };
 }
 async function verifyBundle(bundle, options = {}) {

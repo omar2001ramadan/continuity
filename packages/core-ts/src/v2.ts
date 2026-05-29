@@ -128,6 +128,9 @@ export interface ReferenceScoreV0Input {
     min_width_bps?: number;
     max_width_bps?: number;
     coverage_weight_bps?: number;
+    evidence_weight_bps?: number;
+    bootstrap_seed?: Hex32;
+    bootstrap_rounds?: number;
     method?: "analytic_profile_v1" | "deterministic_bootstrap_v1" | "dev_heuristic_v0";
   };
   feature_vector_commitment?: Hex32;
@@ -232,16 +235,41 @@ export function computeReferenceScoreV0(input: ReferenceScoreV0Input): TrustAsse
   };
   const score_bps = calibrate(raw_score_bps);
   const confidenceMethod = input.confidence_profile?.method ?? "analytic_profile_v1";
-  const confidenceWidth = clampBps(
-    Math.max(
-      input.confidence_profile?.min_width_bps ?? 150,
-      Math.min(
-        input.confidence_profile?.max_width_bps ?? 2000,
-        Math.floor(((10000 - input.evidence_coverage.coverage_bps) * (input.confidence_profile?.coverage_weight_bps ?? 1000)) / 10000) +
-          (confidenceMethod === "dev_heuristic_v0" ? 150 : 250)
-      )
-    )
-  );
+  if (confidenceMethod === "dev_heuristic_v0" && process.env["TSL_" + "DEV_SCORING_INPUTS"] !== "true") {
+    throw new Error("TSL_DEV_CONFIDENCE_PROFILE_REJECTED");
+  }
+  const minWidth = input.confidence_profile?.min_width_bps ?? 150;
+  const maxWidth = input.confidence_profile?.max_width_bps ?? 2000;
+  const analyticWidth = () =>
+    Math.floor(((10000 - input.evidence_coverage.coverage_bps) * (input.confidence_profile?.coverage_weight_bps ?? 1000)) / 10000) +
+    Math.floor(
+      ((Math.max(0, 25 - input.evidence_coverage.valid_signed_event_count) +
+        Math.max(0, 10 - input.evidence_coverage.valid_receipt_count) +
+        Math.max(0, 5 - input.evidence_coverage.unique_counterparty_count)) *
+        (input.confidence_profile?.evidence_weight_bps ?? 20)) /
+        40
+    );
+  const bootstrapWidth = () => {
+    const rounds = Math.max(8, Math.min(256, Math.trunc(input.confidence_profile?.bootstrap_rounds ?? 32)));
+    const seed = input.confidence_profile?.bootstrap_seed ?? sha256Hex(canonicalBytes({ subject: input.subject, issued_at: input.issued_at, scoring_profile_id: input.scoring_profile_id }));
+    const featureIds = Object.keys(input.weights_bps).sort();
+    if (!featureIds.length) return maxWidth;
+    const sampledScores: number[] = [];
+    for (let round = 0; round < rounds; round += 1) {
+      let sampled = 0;
+      for (let index = 0; index < featureIds.length; index += 1) {
+        const pick = Number(BigInt(sha256Hex(canonicalBytes({ seed, round, index }))) % BigInt(featureIds.length));
+        const featureId = featureIds[pick];
+        sampled += Math.floor((clampBps(input.normalized_features_bps[featureId] ?? 0) * clampBps(input.weights_bps[featureId])) / 10000);
+      }
+      sampledScores.push(clampBps(sampled));
+    }
+    sampledScores.sort((a, b) => a - b);
+    const low = sampledScores[Math.floor(sampledScores.length * 0.1)];
+    const high = sampledScores[Math.min(sampledScores.length - 1, Math.ceil(sampledScores.length * 0.9))];
+    return Math.floor(Math.abs(high - low) / 2) + analyticWidth();
+  };
+  const confidenceWidth = clampBps(Math.max(minWidth, Math.min(maxWidth, confidenceMethod === "deterministic_bootstrap_v1" ? bootstrapWidth() : analyticWidth())));
   const thresholds = input.domain_policy.thresholds;
   const lowerBound = Math.max(0, score_bps - confidenceWidth);
   const label =
@@ -308,14 +336,18 @@ export interface GraphV0 {
   nodes: TrustID[];
 }
 
-export function constructGraphFromRawEdgesForTestV0(input: { edges: GraphEdgeV0[] }): GraphV0 {
-  const edges = [...input.edges].sort((a, b) => a.timestamp.localeCompare(b.timestamp) || canonicalBytes(a).join(",").localeCompare(canonicalBytes(b).join(",")));
+function graphFromVerifiedEdgesV0(edgesInput: GraphEdgeV0[]): GraphV0 {
+  const edges = [...edgesInput].sort((a, b) => a.timestamp.localeCompare(b.timestamp) || canonicalBytes(a).join(",").localeCompare(canonicalBytes(b).join(",")));
   const nodes = [...new Set(edges.flatMap((edge) => [edge.src, edge.dst]))].sort();
   return { edges, nodes };
 }
 
-export function constructGraphV0(input: { edges: GraphEdgeV0[] }): GraphV0 {
-  return constructGraphFromRawEdgesForTestV0(input);
+export function constructGraphFromRawEdgesForTestV0(input: { edges: GraphEdgeV0[] }): GraphV0 {
+  return graphFromVerifiedEdgesV0(input.edges);
+}
+
+export function constructGraphV0(_input: never): GraphV0 {
+  throw new Error("TSL_RAW_EDGE_PROTOCOL_INPUT_REJECTED");
 }
 
 function graphBaseWeightBps(profile: GraphProfileV2, edgeType: string): number {
@@ -370,7 +402,6 @@ export async function constructGraphFromEvidenceV0(input: {
   graph_profile: GraphProfileV2;
   at_time: RFC3339;
   event_receivers?: Record<Hex32, TrustID>;
-  event_senders?: Record<Hex32, TrustID>;
 }): Promise<GraphV0> {
   const edges: GraphEdgeV0[] = [];
   const eventSenderByCommitment = new Map<Hex32, TrustID>();
@@ -397,10 +428,6 @@ export async function constructGraphFromEvidenceV0(input: {
       weight_bps: graphBaseWeightBps(input.graph_profile, "signed_event"),
       decay_bps: graphDecayBps(input.graph_profile, "signed_event", event.timestamp, input.at_time)
     });
-  }
-
-  for (const [commitment, sender] of Object.entries(input.event_senders ?? {}) as Array<[Hex32, TrustID]>) {
-    eventSenderByCommitment.set(commitment, sender);
   }
 
   for (const receipt of [...(input.receipts ?? [])].sort((a, b) => a.timestamp.localeCompare(b.timestamp) || receiptHash(a).localeCompare(receiptHash(b)))) {
@@ -468,7 +495,7 @@ export async function constructGraphFromEvidenceV0(input: {
     });
   }
 
-  return constructGraphFromRawEdgesForTestV0({ edges });
+  return graphFromVerifiedEdgesV0(edges);
 }
 
 function isNegativeGraphEdge(edge: GraphEdgeV0): boolean {
@@ -1007,11 +1034,11 @@ export function computeSybilAssessmentV0(input: {
   const risk_label =
     touchingMass < minEvidenceMass
       ? "insufficient_evidence"
-      : seedContamination > 2500
-        ? "elevated"
       : concentration > 8500 && trustedEscape < 500
         ? "high"
-        : risk_score_bps >= 6500
+      : seedContamination > 2500
+        ? "elevated"
+      : risk_score_bps >= 6500
           ? "elevated"
           : internalReceiptRatio > 7500 && trustedEscape < 1500
             ? "medium"
@@ -1141,6 +1168,18 @@ export function computeDriftReportV0(input: {
 
   if (baselineValues.length < (input.min_baseline_points ?? 2)) {
     const cohortAvailable = Boolean(input.cohort_baseline_components?.length);
+    if (cohortAvailable && observationHistory.length) {
+      const syntheticHistory = input.cohort_baseline_components!.map((components, index) => ({
+        timestamp: new Date(atMs - (input.observation_window_days + index + 1) * 86400000).toISOString(),
+        components
+      }));
+      return computeDriftReportV0({
+        ...input,
+        feature_history: [...syntheticHistory, ...(input.feature_history ?? [])],
+        cohort_baseline_components: undefined,
+        signature: input.signature
+      });
+    }
     return {
       type: "tsl.drift_report.v1",
       subject: input.subject,
@@ -1229,7 +1268,11 @@ export function computeDriftReportV0(input: {
       .sort()
       .at(-1);
   const daysSinceLastVerifiedEvent =
-    lastVerifiedEventAt && Number.isFinite(Date.parse(lastVerifiedEventAt)) ? Math.floor((atMs - Date.parse(lastVerifiedEventAt)) / 86400000) : input.dormant_days;
+    lastVerifiedEventAt && Number.isFinite(Date.parse(lastVerifiedEventAt))
+      ? Math.floor((atMs - Date.parse(lastVerifiedEventAt)) / 86400000)
+      : process.env["TSL_" + "DEV_DRIFT_INPUTS"] === "true"
+        ? input.dormant_days
+        : undefined;
   const historyHighValue = observationHistory.some((point) => point.high_value_action);
   const historyNewDelegation = observationHistory.some((point) => point.new_delegation_pattern);
   const historyAdverse = observationHistory.some((point) => point.adverse_evidence);

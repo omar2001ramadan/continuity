@@ -37,6 +37,7 @@ import weightProfileV1Schema from "../../../specs/json-schema/weight_profile.v1.
 import calibrationProfileV1Schema from "../../../specs/json-schema/calibration_profile.v1.schema.json";
 import confidenceProfileV1Schema from "../../../specs/json-schema/confidence_profile.v1.schema.json";
 import providerGovernanceStatusV1Schema from "../../../specs/json-schema/provider_governance_status.v1.schema.json";
+import seedGovernanceProfileV1Schema from "../../../specs/json-schema/seed_governance_profile.v1.schema.json";
 
 export const schemas = {
   identity: identitySchema,
@@ -77,7 +78,8 @@ export const schemas = {
   weightProfileV1: weightProfileV1Schema,
   calibrationProfileV1: calibrationProfileV1Schema,
   confidenceProfileV1: confidenceProfileV1Schema,
-  providerGovernanceStatusV1: providerGovernanceStatusV1Schema
+  providerGovernanceStatusV1: providerGovernanceStatusV1Schema,
+  seedGovernanceProfileV1: seedGovernanceProfileV1Schema
 } as const;
 
 export type SchemaName = keyof typeof schemas;

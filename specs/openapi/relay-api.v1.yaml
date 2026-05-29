@@ -165,27 +165,33 @@ components:
             message: { type: string }
     DelegationVerificationRequest:
       type: object
-      required: [action, delegation_chain, identities]
+      required: [envelope, delegation_policies, agent_actions]
       additionalProperties: false
       properties:
-        action:
-          $ref: '../json-schema/agent_action.v2.schema.json'
-        delegation_chain:
+        envelope:
+          $ref: '../json-schema/event_commitment.v1.schema.json'
+        proof:
+          $ref: '../json-schema/inclusion_proof.v1.schema.json'
+        checkpoint:
+          $ref: '../json-schema/batch_checkpoint.v1.schema.json'
+        delegation_policies:
           type: array
           items:
             $ref: '../json-schema/delegation_policy.v2.schema.json'
+        agent_actions:
+          type: array
+          items:
+            $ref: '../json-schema/agent_action.v2.schema.json'
         identities:
           type: array
           items:
             $ref: '../json-schema/identity.v1.schema.json'
-        parameters:
+        disclosure_consents:
+          type: array
+          items:
+            $ref: '../json-schema/disclosure_consent.v1.schema.json'
+        policy:
           type: object
-        revoked_policy_ids:
-          type: array
-          items: { type: string }
-        revoked_pointers:
-          type: array
-          items: { type: string }
     DelegationVerificationResponse:
       type: object
       required: [status, result]

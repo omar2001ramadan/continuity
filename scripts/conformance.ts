@@ -13,7 +13,6 @@ import {
   computeReferenceScoreV0,
   computeSybilAssessmentV0,
   constructGraphFromEvidenceV0,
-  constructGraphFromRawEdgesForTestV0,
   constructGraphV0,
   verifyDelegatedAgentActionV0
 } from "../packages/core-ts/src/v2";
@@ -496,6 +495,14 @@ function checkObject(entry: TraceabilityEntry): void {
 async function checkSemanticConformance(): Promise<void> {
   assertThrows(() => canonicalBytes({ invalid_float: 0.5 }), "Canonicalization must reject floats");
   assertThrows(() => canonicalBytes({ unsafe_integer: Number.MAX_SAFE_INTEGER + 1 }), "Canonicalization must reject unsafe integers");
+  const scoringProviderSource = fs.readFileSync(path.join(root, "services/scoring-provider/src/index.ts"), "utf8");
+  assert(!scoringProviderSource.includes("dev_allow_caller_features"), "Production scoring endpoint must not allow request-body feature override bypasses");
+  const verifierSource = fs.readFileSync(path.join(root, "packages/core-ts/src/verifier.ts"), "utf8");
+  assert(
+    verifierSource.includes("proof.root === input.checkpoint.revocation_root") && verifierSource.includes("proof.set_root === input.checkpoint.revocation_root"),
+    "Sparse non-membership verifier must bind proof root to checkpoint revocation_root"
+  );
+  assert(verifierSource.includes("seedGovernanceProfileValid"), "Verifier must validate seed governance openings, not only raw seed commitments");
 
   const fakeHash = "0x1111111111111111111111111111111111111111111111111111111111111111" as const;
   const fakeSignature =
@@ -654,16 +661,11 @@ async function checkSemanticConformance(): Promise<void> {
   assert(vector.adversarial_proximity_bps === 6000, `Graph adversarial proximity mismatch: ${vector.adversarial_proximity_bps}`);
   assert(vector.community_escape_bps === 0, `Graph community escape mismatch: ${vector.community_escape_bps}`);
   assert(vector.pagerank_bps !== undefined && vector.trusted_seed_distance_bps !== undefined, "Graph vector missing PageRank/seed-distance fields");
+  assertThrows(() => constructGraphV0({ edges: [] } as never), "Protocol graph construction must reject raw-edge inputs");
 
   const sybil = computeSybilAssessmentV0({
     subject: "did:tsl:a",
-    graph: constructGraphV0({
-      edges: [
-        { src: "did:tsl:a", dst: "did:tsl:b", type: "receipt", timestamp: "2026-05-27T12:00:00Z", created_at: "2026-05-27T12:00:00Z", issuer: "did:tsl:i", weight_bps: 9000 },
-        { src: "did:tsl:b", dst: "did:tsl:a", type: "receipt", timestamp: "2026-05-27T12:00:01Z", created_at: "2026-05-27T12:00:00Z", issuer: "did:tsl:i", weight_bps: 9000 },
-        { src: "did:tsl:a", dst: "did:tsl:seed", type: "signed_event", timestamp: "2026-05-27T12:00:02Z", weight_bps: 100 }
-      ]
-    }),
+    graph,
     graph_profile: {
       type: "tsl.graph_profile.v2",
       profile_id: "graph-default-rc4",
@@ -674,7 +676,7 @@ async function checkSemanticConformance(): Promise<void> {
       negative_edge_policy: { requires_evidence_commitment: true, requires_appeal_uri: true, max_single_negative_weight_bps: 1500, decay_days: 30 },
       privacy_policy: { raw_counterparty_upload_required: false, allows_pairwise_private_features: true }
     },
-    trusted_seeds: ["did:tsl:seed"],
+    trusted_seeds: ["did:tsl:c"],
     computed_at: "2026-05-27T12:00:00Z"
   });
   assert(sybil.risk_label === "high", `Sybil vector risk mismatch: ${sybil.risk_label}`);

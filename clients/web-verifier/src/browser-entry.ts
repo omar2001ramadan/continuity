@@ -39,9 +39,19 @@ function verificationInput(bundle: ProofBundleV1): VerifyTSLInput {
     metadata_fingerprints: bundle.metadata_fingerprints,
     graph_profile: bundle.graph_profile,
     graph_feature_vector: bundle.graph_feature_vector,
+    trusted_seeds: (bundle as unknown as { trusted_seeds?: VerifyTSLInput["trusted_seeds"] }).trusted_seeds,
+    adversarial_seeds: (bundle as unknown as { adversarial_seeds?: VerifyTSLInput["adversarial_seeds"] }).adversarial_seeds,
+    trusted_seed_governance: (bundle as unknown as { trusted_seed_governance?: VerifyTSLInput["trusted_seed_governance"] }).trusted_seed_governance,
+    adversarial_seed_governance: (bundle as unknown as { adversarial_seed_governance?: VerifyTSLInput["adversarial_seed_governance"] }).adversarial_seed_governance,
+    event_receivers: (bundle as unknown as { event_receivers?: VerifyTSLInput["event_receivers"] }).event_receivers,
     sybil_assessment: bundle.sybil_assessment,
+    sybil_profile: (bundle as unknown as { sybil_profile?: VerifyTSLInput["sybil_profile"] }).sybil_profile,
     drift_report: bundle.drift_report,
+    drift_feature_history: (bundle as unknown as { drift_feature_history?: VerifyTSLInput["drift_feature_history"] }).drift_feature_history,
+    drift_cohort_baseline_components: (bundle as unknown as { drift_cohort_baseline_components?: VerifyTSLInput["drift_cohort_baseline_components"] }).drift_cohort_baseline_components,
     zk_proofs: bundle.zk_proofs,
+    zk_circuit_manifests: bundle.zk_circuit_manifests,
+    zk_verification_key_registry: bundle.zk_verification_key_registry,
     delegations: bundle.delegations,
     delegation_policies: bundle.delegation_policies,
     agent_actions: bundle.agent_actions,
@@ -49,7 +59,8 @@ function verificationInput(bundle: ProofBundleV1): VerifyTSLInput {
     consistency_proofs: bundle.consistency_proofs,
     non_membership_proofs: bundle.non_membership_proofs,
     governance_policy: bundle.governance_policy,
-    message_disclosure: bundle.message_disclosure
+    message_disclosure: bundle.message_disclosure,
+    disclosure_consents: bundle.disclosure_consents
   };
 }
 

@@ -97,7 +97,7 @@ export function buildSparseMerkleTree(values: Hex32[], profile: SparseMerkleProf
   };
 }
 
-export function proveSparseMerkleInclusion(value: Hex32, tree: SparseMerkleTreeV1, subject: TrustID, issued_at = new Date().toISOString()): SetNonMembershipProofV1 {
+export function proveSparseMerkleInclusion(value: Hex32, tree: SparseMerkleTreeV1, subject: TrustID, issued_at = new Date().toISOString(), root_checkpoint?: Hex32): SetNonMembershipProofV1 {
   const index = sparseMerkleIndex(value, tree.profile.tree_depth);
   if (tree.leaves.get(index) !== value) throw new Error("TSL_SPARSE_MERKLE_VALUE_MISSING");
   const sibling_path = sparseMerklePath(tree.leaves, index, tree.profile.tree_depth, tree.zero_hashes);
@@ -107,6 +107,7 @@ export function proveSparseMerkleInclusion(value: Hex32, tree: SparseMerkleTreeV
     subject,
     set_root: tree.root,
     root: tree.root,
+    root_checkpoint: root_checkpoint ?? sparseHash("uncheckpointed-root", { tree_id: tree.profile.tree_id, root: tree.root }),
     value_commitment: value,
     tree_id: tree.profile.tree_id,
     tree_depth: tree.profile.tree_depth,
@@ -119,7 +120,7 @@ export function proveSparseMerkleInclusion(value: Hex32, tree: SparseMerkleTreeV
   };
 }
 
-export function proveSparseMerkleNonMembership(value: Hex32, tree: SparseMerkleTreeV1, subject: TrustID, issued_at = new Date().toISOString()): SetNonMembershipProofV1 {
+export function proveSparseMerkleNonMembership(value: Hex32, tree: SparseMerkleTreeV1, subject: TrustID, issued_at = new Date().toISOString(), root_checkpoint?: Hex32): SetNonMembershipProofV1 {
   const index = sparseMerkleIndex(value, tree.profile.tree_depth);
   if (tree.leaves.has(index)) throw new Error("TSL_NON_MEMBERSHIP_VALUE_PRESENT");
   const sibling_path = sparseMerklePath(tree.leaves, index, tree.profile.tree_depth, tree.zero_hashes);
@@ -129,6 +130,7 @@ export function proveSparseMerkleNonMembership(value: Hex32, tree: SparseMerkleT
     subject,
     set_root: tree.root,
     root: tree.root,
+    root_checkpoint: root_checkpoint ?? sparseHash("uncheckpointed-root", { tree_id: tree.profile.tree_id, root: tree.root }),
     value_commitment: value,
     tree_id: tree.profile.tree_id,
     tree_depth: tree.profile.tree_depth,

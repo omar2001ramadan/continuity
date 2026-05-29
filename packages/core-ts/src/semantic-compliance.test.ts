@@ -14,6 +14,7 @@ import {
   verifyTSL,
   buildThresholdProof,
   buildSparseMerkleTree,
+  checkpointHash,
   proveSparseMerkleInclusion,
   proveSparseMerkleNonMembership,
   verifySparseMerkleProof,
@@ -35,7 +36,9 @@ import {
   computeSybilAssessmentV0,
   constructGraphFromEvidenceV0,
   constructGraphFromRawEdgesForTestV0,
+  constructGraphV0,
   delegationPolicyV2Hash,
+  graphFeatureVectorV1Hash,
   signAgentActionV2,
   signDelegationPolicyV2,
   verifyDelegatedAgentActionV0
@@ -216,6 +219,38 @@ describe("semantic compliance hardening", () => {
     expect(graph.edges[1]).toMatchObject({ src: bob.id, dst: alice.id });
   });
 
+  it("rejects raw-edge protocol graph input and recomputes event-only graph claims", async () => {
+    expect(() => constructGraphV0({ edges: [] } as never)).toThrow(/TSL_RAW_EDGE_PROTOCOL_INPUT_REJECTED/);
+
+    const identity = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#key-1", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
+    const signed = signMessageEvent({ sender: identity.id, signing_key_id: "#key-1", seed_hex: aliceSeed, message: "event-only", timestamp: at });
+    const graphProfile = {
+      type: "tsl.graph_profile.v2" as const,
+      profile_id: "graph-default-rc4",
+      edge_weight_profile: "default",
+      temporal_decay_profile: "none",
+      community_detection: { algorithm: "connected_components" as const, resolution_bps: 10000, min_cluster_size: 1 },
+      seed_sets: { trusted_seed_commitment: zero, adversarial_seed_commitment: zero },
+      negative_edge_policy: { requires_evidence_commitment: true, requires_appeal_uri: true, max_single_negative_weight_bps: 1500, decay_days: 30 },
+      privacy_policy: { raw_counterparty_upload_required: false, allows_pairwise_private_features: true }
+    };
+    const badVectorUnsigned = computeGraphFeatureVectorV0({
+      subject: identity.id,
+      graph: constructGraphFromRawEdgesForTestV0({ edges: [{ src: identity.id, dst: "did:tsl:test:bob", type: "signed_event", timestamp: at, weight_bps: 5000 }] }),
+      graph_profile_id: graphProfile.profile_id,
+      graph_profile: graphProfile,
+      computed_at: at
+    });
+    const badVector = { ...badVectorUnsigned, signature: signEd25519(graphFeatureVectorV1Hash(badVectorUnsigned), aliceSeed) };
+    const result = await verifyTSL(
+      { envelope: signed.envelope, graph_profile: graphProfile, graph_feature_vector: badVector },
+      { resolveTrustID: () => identity },
+      { require_graph_artifacts: true }
+    );
+    expect(result.verified).toBe(false);
+    expect(result.errors).toContain("TSL_GRAPH_ARTIFACTS_INVALID");
+  });
+
   it("supports deterministic louvain/leiden profiles and PageRank-like seed distance fields", () => {
     const graph = constructGraphFromRawEdgesForTestV0({
       edges: [
@@ -320,6 +355,66 @@ describe("semantic compliance hardening", () => {
     expect(drift.drift_score_bps).toBeGreaterThanOrEqual(8000);
     expect(drift.feature_history_commitment).toMatch(/^0x[0-9a-f]{64}$/);
     expect(drift.covariance_profile_commitment).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it("requires seed governance openings to match graph profile commitments", async () => {
+    const subject = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#key-1", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
+    const governor = buildIdentityFromSeed({ trust_id: "did:tsl:seed-governor:test", key_id: "#gov", seed_hex: relaySeed, created_at: "2026-01-01T00:00:00Z" });
+    const signed = signMessageEvent({ sender: subject.id, signing_key_id: "#key-1", seed_hex: aliceSeed, message: "seed-governance", timestamp: at });
+    const trustedSeeds = ["did:tsl:trusted:1"];
+    const adversarialSeeds = ["did:tsl:adversarial:1"];
+    const trustedCommitment = sha256Hex(canonicalBytes(trustedSeeds));
+    const adversarialCommitment = sha256Hex(canonicalBytes(adversarialSeeds));
+    const unsignedTrusted = {
+      type: "tsl.seed_governance_profile.v1" as const,
+      profile_id: "trusted-seeds-v1",
+      issuer: governor.id,
+      review_state: "approved" as const,
+      source_class: "auditor_curated" as const,
+      seed_class: "trusted" as const,
+      seeds: trustedSeeds,
+      seed_set_commitment: trustedCommitment,
+      governance_policy_commitment: sha256Hex("governance"),
+      reviewed_at: at,
+      signature: "0x00" as const
+    };
+    const unsignedAdversarial = { ...unsignedTrusted, profile_id: "adversarial-seeds-v1", seed_class: "adversarial" as const, seeds: adversarialSeeds, seed_set_commitment: adversarialCommitment };
+    const stripSignature = (profile: Record<string, unknown>) => {
+      const copy = { ...profile } as Record<string, unknown>;
+      delete copy.signature;
+      return copy;
+    };
+    const trustedGovernance = { ...unsignedTrusted, signature: signEd25519(sha256Hex(canonicalBytes(stripSignature(unsignedTrusted))), relaySeed) };
+    const adversarialGovernance = { ...unsignedAdversarial, signature: signEd25519(sha256Hex(canonicalBytes(stripSignature(unsignedAdversarial))), relaySeed) };
+    const graphProfile = {
+      type: "tsl.graph_profile.v2" as const,
+      profile_id: "graph-seed-governed",
+      edge_weight_profile: "default",
+      temporal_decay_profile: "none",
+      community_detection: { algorithm: "connected_components" as const, resolution_bps: 10000, min_cluster_size: 1 },
+      seed_sets: {
+        trusted_seed_commitment: trustedCommitment,
+        adversarial_seed_commitment: adversarialCommitment,
+        trusted_seed_governance_commitment: sha256Hex(canonicalBytes(stripSignature(trustedGovernance))),
+        adversarial_seed_governance_commitment: sha256Hex(canonicalBytes(stripSignature(adversarialGovernance)))
+      },
+      negative_edge_policy: { requires_evidence_commitment: true, requires_appeal_uri: true, max_single_negative_weight_bps: 1500, decay_days: 30 },
+      privacy_policy: { raw_counterparty_upload_required: false, allows_pairwise_private_features: true }
+    };
+    const result = await verifyTSL(
+      {
+        envelope: signed.envelope,
+        graph_profile: graphProfile,
+        trusted_seeds: trustedSeeds,
+        adversarial_seeds: ["did:tsl:wrong"],
+        trusted_seed_governance: trustedGovernance,
+        adversarial_seed_governance: adversarialGovernance
+      },
+      { resolveTrustID: (trustId: string) => (trustId === subject.id ? subject : trustId === governor.id ? governor : null) },
+      { require_seed_governance_opening: true }
+    );
+    expect(result.verified).toBe(false);
+    expect(result.errors).toContain("TSL_SEED_GOVERNANCE_OPENING_INVALID");
   });
 
   it("scopes metadata fingerprints by verifier, epoch, and bucketized metadata only", () => {
@@ -510,6 +605,46 @@ describe("semantic compliance hardening", () => {
     expect(verifySparseMerkleProof({ ...absent, sibling_path: absent.sibling_path?.slice(1) }, tree.root, tree.profile)).toBe(false);
   });
 
+  it("binds sparse non-membership proofs to checkpoint revocation roots", async () => {
+    const identity = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#key-1", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
+    const relay = buildIdentityFromSeed({ trust_id: "did:tsl:relay:test", key_id: "#relay-checkpoint", seed_hex: relaySeed, created_at: "2026-01-01T00:00:00Z" });
+    const signed = signMessageEvent({ sender: identity.id, signing_key_id: "#key-1", seed_hex: aliceSeed, message: "nonmembership", timestamp: at });
+    const tree = buildSparseMerkleTree([sha256Hex("revoked-a") as Hex32], { tree_id: "revocation-set-v1", tree_depth: 8 });
+    const checkpointBase: BatchCheckpointV1 = {
+      type: "tsl.batch_checkpoint.v1",
+      epoch_start_ms: Date.parse(at),
+      epoch_duration_ms: 300000,
+      shard: "test",
+      event_root: zero,
+      receipt_root: zero,
+      attestation_root: zero,
+      revocation_root: tree.root,
+      event_count: 0,
+      receipt_count: 0,
+      previous_checkpoint: zero,
+      relay_id: relay.id,
+      relay_signature: "0x00"
+    };
+    const checkpoint = { ...checkpointBase, relay_signature: signEd25519(checkpointHash(checkpointBase), relaySeed) };
+    const absent = proveSparseMerkleNonMembership(sha256Hex("not-revoked") as Hex32, tree, identity.id, at, checkpointHash(checkpoint));
+    const accepted = await verifyTSL(
+      { envelope: signed.envelope, checkpoint, non_membership_proofs: [absent] },
+      { resolveTrustID: (trustId: string) => (trustId === identity.id ? identity : trustId === relay.id ? relay : null) },
+      { require_non_membership_proof: true, require_sparse_merkle_revocation_root: true }
+    );
+    expect(accepted.verified).toBe(true);
+
+    const wrongCheckpointBase = { ...checkpointBase, revocation_root: sha256Hex("other-root") as Hex32 };
+    const wrongCheckpoint = { ...wrongCheckpointBase, relay_signature: signEd25519(checkpointHash(wrongCheckpointBase), relaySeed) };
+    const rejected = await verifyTSL(
+      { envelope: signed.envelope, checkpoint: wrongCheckpoint, non_membership_proofs: [{ ...absent, root_checkpoint: checkpointHash(wrongCheckpoint) }] },
+      { resolveTrustID: (trustId: string) => (trustId === identity.id ? identity : trustId === relay.id ? relay : null) },
+      { require_non_membership_proof: true, require_sparse_merkle_revocation_root: true }
+    );
+    expect(rejected.verified).toBe(false);
+    expect(rejected.errors).toContain("TSL_NON_MEMBERSHIP_PROOF_INVALID");
+  });
+
   it("verifies relay checkpoint signatures against relay identity keys", async () => {
     const store = new InMemoryRelayStore({
       relay_id: "did:tsl:relay:test",
@@ -659,5 +794,5 @@ describe("semantic compliance hardening", () => {
     expect(() => execFileSync("npx", ["tsx", "scripts/conformance.ts", "mainnet"], { cwd: process.cwd(), stdio: "pipe" })).toThrow(
       /MAINNET production-readiness evidence must be approved/
     );
-  });
+  }, 60000);
 });

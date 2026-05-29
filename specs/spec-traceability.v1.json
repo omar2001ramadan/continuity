@@ -260,6 +260,22 @@
       "conformance_level": "rc3"
     },
     {
+      "object_type": "seed_governance_profile.v1",
+      "schema_name": "seedGovernanceProfileV1",
+      "schema_path": "specs/json-schema/seed_governance_profile.v1.schema.json",
+      "ts_type": "SeedGovernanceProfileV1",
+      "validator": "seedGovernanceProfileV1",
+      "valid_example": "specs/examples/valid/seed_governance_profile.v1.json",
+      "invalid_examples": [
+        "specs/examples/invalid/seed_governance_profile.v1/missing-required.json",
+        "specs/examples/invalid/seed_governance_profile.v1/malformed-signature-or-hash.json",
+        "specs/examples/invalid/seed_governance_profile.v1/unknown-field.json"
+      ],
+      "test_vector": "specs/test-vectors/seed_governance_profile.v1/default",
+      "migration_note": "seed_governance_profile.v1 binds trusted/adversarial seed openings to reviewed governance and provider or auditor signatures.",
+      "conformance_level": "rc3"
+    },
+    {
       "object_type": "graph_profile.v2",
       "schema_name": "graphProfileV2",
       "schema_path": "specs/json-schema/graph_profile.v2.schema.json",

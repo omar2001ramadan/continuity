@@ -99,6 +99,14 @@
         "adversarial_seed_commitment": {
           "type": "string",
           "pattern": "^0x[0-9a-f]{64}$"
+        },
+        "trusted_seed_governance_commitment": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        },
+        "adversarial_seed_governance_commitment": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
         }
       }
     },

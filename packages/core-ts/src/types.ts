@@ -358,6 +358,8 @@ export interface GraphProfileV2 {
   seed_sets: {
     trusted_seed_commitment: Hex32;
     adversarial_seed_commitment: Hex32;
+    trusted_seed_governance_commitment?: Hex32;
+    adversarial_seed_governance_commitment?: Hex32;
   };
   negative_edge_policy: {
     requires_evidence_commitment: boolean;
@@ -377,6 +379,20 @@ export interface GraphProfileV2 {
     damping_bps: number;
     personalization?: "trusted_seeds" | "subject" | "uniform";
   };
+}
+
+export interface SeedGovernanceProfileV1 {
+  type: "tsl.seed_governance_profile.v1";
+  profile_id: string;
+  issuer: TrustID;
+  review_state: "draft" | "reviewed" | "approved" | "rejected" | "revoked";
+  source_class: "protocol_reference" | "auditor_curated" | "provider_curated" | "enterprise_private";
+  seed_class: "trusted" | "adversarial";
+  seeds: TrustID[];
+  seed_set_commitment: Hex32;
+  governance_policy_commitment: Hex32;
+  reviewed_at: RFC3339;
+  signature?: HexSig;
 }
 
 export interface GraphFeatureVectorV1 {
@@ -646,9 +662,13 @@ export interface CalibrationProfileV1 {
 export interface ConfidenceProfileV1 {
   type: "tsl.confidence_profile.v1";
   profile_id: string;
+  method?: "analytic_profile_v1" | "deterministic_bootstrap_v1" | "dev_heuristic_v0";
   min_width_bps: number;
   max_width_bps: number;
   coverage_weight_bps: number;
+  evidence_weight_bps?: number;
+  bootstrap_seed?: Hex32;
+  bootstrap_rounds?: number;
   issued_at: RFC3339;
   signature?: HexSig;
 }
@@ -751,8 +771,16 @@ export interface ProofBundleV1 {
   metadata_fingerprints?: MetadataFingerprintCommitmentV1[];
   graph_profile?: GraphProfileV2;
   graph_feature_vector?: GraphFeatureVectorV1;
+  trusted_seeds?: TrustID[];
+  adversarial_seeds?: TrustID[];
+  trusted_seed_governance?: SeedGovernanceProfileV1;
+  adversarial_seed_governance?: SeedGovernanceProfileV1;
+  event_receivers?: Record<Hex32, TrustID>;
   sybil_assessment?: SybilAssessmentV1;
+  sybil_profile?: VerifyTSLInput["sybil_profile"];
   drift_report?: DriftReportV1;
+  drift_feature_history?: VerifyTSLInput["drift_feature_history"];
+  drift_cohort_baseline_components?: VerifyTSLInput["drift_cohort_baseline_components"];
   zk_proofs?: ZkThresholdProofV1[];
   zk_circuit_manifests?: ZkCircuitReleaseManifestV1[];
   zk_verification_key_registry?: ZkVerificationKeyRegistryV1;
@@ -806,6 +834,7 @@ export interface VerifierPolicy {
   require_full_covariance_drift?: boolean;
   require_manifest_verification_key_hash?: boolean;
   reject_dev_zk_circuits?: boolean;
+  reject_unsigned_local_proof_bundles?: boolean;
   accepted_auditors?: TrustID[];
   accepted_governance_policy?: string;
   accepted_scoring_providers?: TrustID[];
@@ -892,8 +921,36 @@ export interface VerifyTSLInput {
   metadata_fingerprints?: MetadataFingerprintCommitmentV1[];
   graph_profile?: GraphProfileV2;
   graph_feature_vector?: GraphFeatureVectorV1;
+  trusted_seeds?: TrustID[];
+  adversarial_seeds?: TrustID[];
+  trusted_seed_governance?: SeedGovernanceProfileV1;
+  adversarial_seed_governance?: SeedGovernanceProfileV1;
+  event_receivers?: Record<Hex32, TrustID>;
   sybil_assessment?: SybilAssessmentV1;
+  sybil_profile?: {
+    profile_id: string;
+    adversary_tier?: SybilAssessmentV1["adversary_tier_assumed"];
+    min_evidence_mass?: number;
+    base_identity_cost_minor_units?: number;
+    time_aging_cost_minor_units?: number;
+    external_receipt_cost_minor_units?: number;
+    attestation_cost_minor_units?: number;
+    compromise_cost_minor_units?: number;
+    evasion_cost_minor_units?: number;
+    internal_edge_cost_minor_units?: number;
+    expected_benefit_minor_units?: number;
+    attack_scenario?: string;
+  };
   drift_report?: DriftReportV1;
+  drift_feature_history?: Array<{
+    timestamp: RFC3339;
+    components: Partial<Record<"key" | "graph" | "action" | "cadence" | "claim" | "agent" | "local", number>>;
+    verified_event?: boolean;
+    high_value_action?: boolean;
+    new_delegation_pattern?: boolean;
+    adverse_evidence?: boolean;
+  }>;
+  drift_cohort_baseline_components?: Array<Partial<Record<"key" | "graph" | "action" | "cadence" | "claim" | "agent" | "local", number>>>;
   zk_proofs?: ZkThresholdProofV1[];
   zk_circuit_manifests?: ZkCircuitReleaseManifestV1[];
   zk_verification_key_registry?: ZkVerificationKeyRegistryV1;

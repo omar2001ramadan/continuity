@@ -1,0 +1,16 @@
+{
+  "type": "tsl.test_vector_manifest.v1",
+  "vector_id": "seed_governance_profile.v1/default",
+  "spec_version": "3.0.0",
+  "object_type": "tsl.seed_governance_profile.v1",
+  "canonicalization": "tsl-json-c14n-v1",
+  "hash_suite": "sha256-domain-v1",
+  "signature_suite": "ed25519-v1",
+  "input_files": ["input.json"],
+  "expected": {
+    "schema_valid": true,
+    "canonical_hash": "0xd24748785731b06a2ed89ce17a2a2618f237bcda6c55378d5fc3f7af77f54232",
+    "signature_valid": true,
+    "error_code": null
+  }
+}

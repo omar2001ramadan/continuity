@@ -1,0 +1,13 @@
+{
+  "type": "tsl.seed_governance_profile.v1",
+  "profile_id": "trusted-seeds-reference-v1",
+  "issuer": "did:tsl:provider:reference-sybil",
+  "review_state": "approved",
+  "source_class": "auditor_curated",
+  "seed_class": "trusted",
+  "seeds": ["did:tsl:seed:trusted-a"],
+  "seed_set_commitment": "not-a-hash",
+  "governance_policy_commitment": "0x1111111111111111111111111111111111111111111111111111111111111111",
+  "reviewed_at": "2026-05-27T12:00:00Z",
+  "signature": "0x22"
+}

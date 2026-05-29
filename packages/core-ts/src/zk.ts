@@ -216,8 +216,10 @@ export async function verifyThresholdProofAsync(
   const manifest = manifestForProof({ proof, manifests: options.manifests });
   if (options.require_registered_circuit && !zkProofUsesRegisteredCircuit({ proof, manifests: options.manifests, registry: options.registry })) return false;
   if (options.reject_dev_circuits && manifest?.status !== "active") return false;
+  const requireManifestKeyHash = Boolean(options.require_manifest_verification_key_hash || options.require_registered_circuit || options.reject_dev_circuits);
+  if (requireManifestKeyHash && !manifest?.verification_key) return false;
   const verificationKey = manifest?.verification_key ?? proof.groth16.verification_key;
-  if (options.require_manifest_verification_key_hash) {
+  if (requireManifestKeyHash) {
     if (!manifest) return false;
     if (zkVerificationKeyObjectHash(verificationKey) !== manifest.verification_key_hash) return false;
   }

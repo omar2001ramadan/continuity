@@ -12,6 +12,7 @@ import {
   findVerificationMethod,
   InMemoryRelayStore,
   keyActiveAt,
+  MemoryTrustResolver,
   PostgresTrustResolver,
   QUEUE_TOPICS,
   receiptCommitmentHash,
@@ -430,9 +431,19 @@ export function createRelayNode() {
           metadata_fingerprints: req.body.metadata_fingerprints,
           graph_profile: req.body.graph_profile,
           graph_feature_vector: req.body.graph_feature_vector,
+          trusted_seeds: req.body.trusted_seeds,
+          adversarial_seeds: req.body.adversarial_seeds,
+          trusted_seed_governance: req.body.trusted_seed_governance,
+          adversarial_seed_governance: req.body.adversarial_seed_governance,
+          event_receivers: req.body.event_receivers,
           sybil_assessment: req.body.sybil_assessment,
+          sybil_profile: req.body.sybil_profile,
           drift_report: req.body.drift_report,
+          drift_feature_history: req.body.drift_feature_history,
+          drift_cohort_baseline_components: req.body.drift_cohort_baseline_components,
           zk_proofs: req.body.zk_proofs,
+          zk_circuit_manifests: req.body.zk_circuit_manifests,
+          zk_verification_key_registry: req.body.zk_verification_key_registry,
           delegations: req.body.delegations,
           delegation_policies: req.body.delegation_policies,
           agent_actions: req.body.agent_actions,
@@ -458,9 +469,13 @@ export function createRelayNode() {
 
   app.post("/v1/delegations/verify", async (req, res) => {
     try {
+      const requestIdentities = Array.isArray(req.body.identities) ? req.body.identities : [];
+      const requestResolver = requestIdentities.length ? new MemoryTrustResolver(requestIdentities) : null;
       const resolver = repo
-        ? new CompositeTrustResolver([store.resolver, new PostgresTrustResolver(repo)])
-        : store.resolver;
+        ? new CompositeTrustResolver([...(requestResolver ? [requestResolver] : []), store.resolver, new PostgresTrustResolver(repo)])
+        : requestResolver
+          ? new CompositeTrustResolver([requestResolver, store.resolver])
+          : store.resolver;
       const result = await verifyTSL(
         {
           envelope: req.body.envelope,
@@ -468,11 +483,12 @@ export function createRelayNode() {
           checkpoint: req.body.checkpoint,
           delegations: req.body.delegations,
           delegation_policies: req.body.delegation_policies,
-          agent_actions: req.body.agent_actions
+          agent_actions: req.body.agent_actions,
+          disclosure_consents: req.body.disclosure_consents
         },
         resolver,
-        {
-          ...(req.body.delegations?.length ? { require_agent_scope: req.body.require_agent_scope ?? "inside_scope" } : {}),
+        req.body.policy ?? {
+          require_agent_scope: req.body.require_agent_scope ?? "inside_scope",
           require_settlement: Boolean(req.body.require_settlement)
         },
         settlementBackend ?? undefined

@@ -117,6 +117,41 @@
         }
       }
     },
+    "trusted_seeds": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "adversarial_seeds": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "trusted_seed_governance": {
+      "type": "object"
+    },
+    "adversarial_seed_governance": {
+      "type": "object"
+    },
+    "event_receivers": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "sybil_profile": {
+      "type": "object"
+    },
+    "drift_feature_history": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "drift_cohort_baseline_components": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "local_disclosure_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "audit_findings": {
       "type": "array",
       "items": {
