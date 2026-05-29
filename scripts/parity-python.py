@@ -111,6 +111,8 @@ def main():
         "circuit_id": "tsl.identity_age_days.production_interface.v1",
         "claim": "identity_age_days",
         "version": "1.0.0",
+        "hash_suite": "poseidon-bn254-v1",
+        "witness_interface": "identity_age_days.production_witness.v1",
         "circuit_hash": hex32,
         "r1cs_hash": hex32,
         "wasm_hash": hex32,
@@ -138,11 +140,12 @@ def main():
     })
     for schema_name, value in [
         ("feature_registry.v1.schema.json", {"type": "tsl.feature_registry.v1", "registry_id": "features", "feature_ids": ["a"], "feature_definitions": [{"feature_id": "a", "value_type": "bps", "privacy_class": "aggregate", "source": "verified_event"}], "issued_at": "2026-05-27T12:00:00Z"}),
-        ("normalization_profile.v1.schema.json", {"type": "tsl.normalization_profile.v1", "profile_id": "norm", "feature_ranges_bps": {"a": {"min_bps": 0, "max_bps": 10000, "missing_bps": 0}}, "missing_value_policy": "impute_zero_with_coverage_penalty", "time_split_fit_status": "train_validation_test_split", "issued_at": "2026-05-27T12:00:00Z"}),
+        ("normalization_profile.v1.schema.json", {"type": "tsl.normalization_profile.v1", "profile_id": "norm", "feature_ranges_bps": {"a": {"min_bps": 0, "max_bps": 10000, "missing_bps": 0}}, "feature_methods": {"a": "bounded"}, "missing_value_policy": "impute_zero_with_coverage_penalty", "time_split_fit_status": "train_validation_test_split", "issued_at": "2026-05-27T12:00:00Z"}),
         ("weight_profile.v1.schema.json", {"type": "tsl.weight_profile.v1", "profile_id": "weights", "weights_bps": {"a": 10000}, "issued_at": "2026-05-27T12:00:00Z"}),
         ("calibration_profile.v1.schema.json", {"type": "tsl.calibration_profile.v1", "profile_id": "cal", "points": [{"raw_bps": 0, "calibrated_bps": 0}, {"raw_bps": 10000, "calibrated_bps": 10000}], "issued_at": "2026-05-27T12:00:00Z"}),
         ("confidence_profile.v1.schema.json", {"type": "tsl.confidence_profile.v1", "profile_id": "conf", "method": "deterministic_bootstrap_v1", "bootstrap_unit": "edge_counterparty_attestation", "min_width_bps": 100, "max_width_bps": 1000, "coverage_weight_bps": 500, "issued_at": "2026-05-27T12:00:00Z"}),
         ("provider_governance_status.v1.schema.json", {"type": "tsl.provider_governance_status.v1", "provider": "did:tsl:provider:test", "status": "active", "model_registered": True, "evaluation_report_commitment": hex32, "red_team_result": "pass", "privacy_leakage_bps": 100, "promotion_gate_result": "pass", "issued_at": "2026-05-27T12:00:00Z"}),
+        ("sybil_simulation_profile.v1.schema.json", {"type": "tsl.sybil_simulation_profile.v1", "profile_id": "sim", "issuer": "did:tsl:provider:test", "graph_profile_id": "graph", "scenarios": [{"scenario_id": "b0", "adversary_tier": "B0", "subject": "did:tsl:a", "attack_scenario": "dense_farm", "expected_benefit_minor_units": 100, "evidence_commitment": hex32}], "issued_at": "2026-05-27T12:00:00Z"}),
     ]:
         check_schema_value(schema_name, value)
 

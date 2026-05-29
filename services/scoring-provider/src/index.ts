@@ -57,6 +57,33 @@ function signedByIdentity(input: {
   return Boolean(key && input.signature && verifyEd25519(key.public_key, input.hash as `0x${string}`, input.signature as `0x${string}`));
 }
 
+function identityFromRegistrationBody(body: Record<string, unknown>, provider?: string): IdentityDocumentV1 | undefined {
+  const identities = [
+    body.identity,
+    ...(Array.isArray(body.identities) ? body.identities : [])
+  ].filter(Boolean) as IdentityDocumentV1[];
+  return identities.find((identity) => identity.id === provider) ?? identities[0];
+}
+
+function devRegistrationMode(): boolean {
+  return process.env.TSL_DEV_SCORING_REGISTRATIONS === "true" || process.env["TSL_" + "DEV_SCORING_INPUTS"] === "true";
+}
+
+function registrationSignatureValid(input: {
+  body: Record<string, unknown>;
+  provider?: string;
+  issuedAt?: string;
+  hash: string;
+  signature?: string;
+}): boolean {
+  return signedByIdentity({
+    identity: identityFromRegistrationBody(input.body, input.provider),
+    issuedAt: input.issuedAt ?? new Date(0).toISOString(),
+    hash: input.hash,
+    signature: input.signature
+  });
+}
+
 function scoringVerificationArtifacts(source: Record<string, unknown> | undefined): Partial<VerifyTSLInput> {
   if (!source) return {};
   return {
@@ -79,7 +106,12 @@ function scoringVerificationArtifacts(source: Record<string, unknown> | undefine
 
 function normalizeFeaturesFromProfiles(input: {
   featureRegistry: { feature_ids: string[] };
-  normalizationProfile: { feature_ranges_bps: Record<string, { min_bps: number; max_bps: number; missing_bps: number }> };
+  normalizationProfile: {
+    feature_ranges_bps: Record<string, { min_bps: number; max_bps: number; missing_bps: number }>;
+    feature_methods?: Record<string, "bounded" | "log_percentile" | "asinh" | "risk_penalty">;
+    asinh_scales_bps?: Record<string, number>;
+    percentiles_bps?: Record<string, { p05_bps: number; p50_bps: number; p95_bps: number }>;
+  };
   weightProfile: { weights_bps: Record<string, number>; feature_directions?: Record<string, "positive" | "penalty"> };
   rawFeatures: Record<string, number | undefined>;
 }): { normalized: Record<string, number>; weights: Record<string, number>; errors: string[] } {
@@ -99,9 +131,28 @@ function normalizeFeaturesFromProfiles(input: {
     }
     const raw = input.rawFeatures[featureId];
     const value = typeof raw === "number" ? raw : range.missing_bps;
+    const method = input.normalizationProfile.feature_methods?.[featureId] ?? "bounded";
     const span = Math.max(1, range.max_bps - range.min_bps);
-    const normalizedValue = Math.max(0, Math.min(10000, Math.floor(((value - range.min_bps) * 10000) / span)));
-    normalized[featureId] = input.weightProfile.feature_directions?.[featureId] === "penalty" ? 10000 - normalizedValue : normalizedValue;
+    const bounded = Math.max(0, Math.min(10000, Math.floor(((value - range.min_bps) * 10000) / span)));
+    const percentiles = input.normalizationProfile.percentiles_bps?.[featureId];
+    const normalizedValue =
+      method === "log_percentile" && percentiles
+        ? Math.max(
+            0,
+            Math.min(
+              10000,
+              Math.floor(
+                ((Math.log1p(Math.max(0, value)) - Math.log1p(percentiles.p05_bps)) * 10000) /
+                  Math.max(1, Math.log1p(percentiles.p95_bps) - Math.log1p(percentiles.p05_bps))
+              )
+            )
+          )
+        : method === "asinh"
+          ? Math.max(0, Math.min(10000, Math.floor((Math.asinh(value / Math.max(1, input.normalizationProfile.asinh_scales_bps?.[featureId] ?? 1000)) / Math.asinh(10000 / Math.max(1, input.normalizationProfile.asinh_scales_bps?.[featureId] ?? 1000))) * 10000)))
+          : method === "risk_penalty"
+            ? 10000 - bounded
+            : bounded;
+    normalized[featureId] = input.weightProfile.feature_directions?.[featureId] === "penalty" && method !== "risk_penalty" ? 10000 - normalizedValue : normalizedValue;
     weights[featureId] = Math.max(0, Math.min(10000, Math.trunc(weight)));
   }
   return { normalized, weights, errors };
@@ -169,6 +220,19 @@ export function createScoringProvider() {
         res.status(422).json({ error: { code: "TSL_SCORING_PROFILE_INVALID", message: validation.errors.join("; ") } });
         return;
       }
+      if (
+        !devRegistrationMode() &&
+        !registrationSignatureValid({
+          body: req.body,
+          provider: profile.provider,
+          issuedAt: profile.issued_at,
+          hash: scoringProfileV2Hash(profile),
+          signature: profile.signature
+        })
+      ) {
+        res.status(401).json({ error: { code: "TSL_SCORING_GOVERNANCE_INVALID", message: "Scoring profile registration requires a provider-signed profile and matching provider identity" } });
+        return;
+      }
       if (repo) {
         const profile_hash = await repo.upsertScoringProfileV2(profile);
         res.json({ status: "accepted", profile_hash, profile });
@@ -193,6 +257,19 @@ export function createScoringProvider() {
         res.status(422).json({ error: { code: "TSL_MODEL_CARD_INVALID", message: validation.errors.join("; ") } });
         return;
       }
+      if (
+        !devRegistrationMode() &&
+        !registrationSignatureValid({
+          body: req.body,
+          provider: model_card.provider,
+          issuedAt: model_card.issued_at,
+          hash: unsignedObjectHash(model_card),
+          signature: model_card.signature
+        })
+      ) {
+        res.status(401).json({ error: { code: "TSL_SCORING_GOVERNANCE_INVALID", message: "Model card registration requires a provider signature and matching provider identity" } });
+        return;
+      }
       if (repo) {
         const model_card_hash = await repo.upsertModelCardV2(model_card);
         res.json({ status: "accepted", model_card_hash, model_card });
@@ -215,6 +292,19 @@ export function createScoringProvider() {
       const validation = validateSchema("evaluationReportV1", evaluation_report);
       if (!validation.valid) {
         res.status(422).json({ error: { code: "TSL_EVALUATION_REPORT_INVALID", message: validation.errors.join("; ") } });
+        return;
+      }
+      if (
+        !devRegistrationMode() &&
+        !registrationSignatureValid({
+          body: req.body,
+          provider: String(req.body.provider ?? process.env.TSL_SCORING_PROVIDER_ID ?? ""),
+          issuedAt: evaluation_report.issued_at,
+          hash: unsignedObjectHash(evaluation_report),
+          signature: evaluation_report.signature
+        })
+      ) {
+        res.status(401).json({ error: { code: "TSL_SCORING_GOVERNANCE_INVALID", message: "Evaluation report registration requires a provider signature and matching provider identity" } });
         return;
       }
       if (repo) {
@@ -506,6 +596,21 @@ export function createScoringProvider() {
         });
         return;
       }
+      const callerDerivedFeatureFields = [
+        "distinct_community_count",
+        "attestation_count",
+        "recent_revocation_count",
+        "cadence_intervals_ms"
+      ].filter((field) => req.body[field] !== undefined);
+      if (!allowCallerFeatures && callerDerivedFeatureFields.length) {
+        res.status(400).json({
+          error: {
+            code: "TSL_CALLER_SUPPLIED_SCORING_FEATURES_REJECTED",
+            message: `Production v2 scoring does not accept caller-derived feature counts outside verified evidence/profile inputs: ${callerDerivedFeatureFields.join(", ")}`
+          }
+        });
+        return;
+      }
       if (!allowCallerFeatures && req.body.local_relationship_bps !== undefined) {
         res.status(400).json({
           error: {
@@ -600,9 +705,9 @@ export function createScoringProvider() {
               valid_signed_event_count: verification.checks.signature_valid ? 1 : 0,
               valid_receipt_count: verifyInput.receipts?.length ?? 0,
               unique_counterparty_count: receiptCounterparties.size,
-              distinct_community_count: Number(req.body.distinct_community_count ?? 0),
-              attestation_count: Number(req.body.attestation_count ?? 0),
-              recent_revocation_count: Number(req.body.recent_revocation_count ?? 0),
+              distinct_community_count: 0,
+              attestation_count: (verifyInput.attestations?.length ?? 0) + (verifyInput.attestations_v2?.length ?? 0),
+              recent_revocation_count: verifyInput.revocations?.length ?? 0,
               computed_at: now.toISOString()
             });
       const rawFeatureValues = {
@@ -619,8 +724,8 @@ export function createScoringProvider() {
           verification_checks: verification.checks,
           valid_signed_event_count: verification.checks.signature_valid ? 1 : 0,
           clustered_receipt_count: new Set((verifyInput.receipts ?? []).map((receipt) => receipt.metadata_commitment ?? receipt.receiver)).size,
-          cadence_intervals_ms: Array.isArray(req.body.cadence_intervals_ms) ? req.body.cadence_intervals_ms.map(Number) : undefined,
-          local_relationship_bps: req.body.local_relationship_bps !== undefined ? Number(req.body.local_relationship_bps) : undefined,
+          cadence_intervals_ms: allowCallerFeatures && Array.isArray(req.body.cadence_intervals_ms) ? req.body.cadence_intervals_ms.map(Number) : undefined,
+          local_relationship_bps: allowCallerFeatures && req.body.local_relationship_bps !== undefined ? Number(req.body.local_relationship_bps) : undefined,
           local_relationship_disclosed: allowCallerFeatures,
           computed_at: now.toISOString()
         }),

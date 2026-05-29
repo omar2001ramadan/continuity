@@ -1,4 +1,5 @@
 export * from "./canonicalize";
+export * from "./checkpointImport";
 export * from "./commitments";
 export * from "./consistency";
 export * from "./crypto";
@@ -44,6 +45,8 @@ export {
   computeSybilAssessmentV0,
   sybilAssessmentV1Hash,
   signSybilAssessmentV1,
+  sybilSimulationProfileV1Hash,
+  runSybilSimulationProfileV1,
   computeDriftReportV0,
   driftReportV1Hash,
   signDriftReportV1,

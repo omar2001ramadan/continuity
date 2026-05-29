@@ -153,6 +153,10 @@
         "type": "string"
       }
     },
+    "evidence_commitment": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
     "feature_vector_commitment": {
       "type": "string",
       "pattern": "^0x[0-9a-f]{64}$"

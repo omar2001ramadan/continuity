@@ -353,8 +353,8 @@ export class PostgresRepository {
       `INSERT INTO trust_assessments_v2(
         assessment_hash, subject_trust_id, provider_id, profile_id, score_bps,
         confidence_low_bps, confidence_high_bps, risk_label, evidence_coverage_hash,
-        evidence_commitment, issued_at, expires_at, canonical_body, signature
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        evidence_commitment, feature_vector_commitment, issued_at, expires_at, canonical_body, signature
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
       ON CONFLICT (assessment_hash) DO UPDATE SET canonical_body = EXCLUDED.canonical_body`,
       [
         hash,
@@ -366,6 +366,7 @@ export class PostgresRepository {
         assessment.confidence_interval_bps?.[1] ?? null,
         assessment.label,
         assessment.evidence_coverage_commitment ?? null,
+        assessment.evidence_commitment ?? null,
         assessment.feature_vector_commitment ?? null,
         assessment.issued_at,
         assessment.expires_at,
@@ -708,6 +709,15 @@ export class PostgresRepository {
     return checkpoint;
   }
 
+  async getLatestCheckpointBefore(epochStartMs: number, shard: string): Promise<BatchCheckpointV1 | null> {
+    const result = await this.pool.query(
+      "SELECT epoch_start_ms FROM checkpoints WHERE shard = $1 AND epoch_start_ms < $2 ORDER BY epoch_start_ms DESC LIMIT 1",
+      [shard, epochStartMs]
+    );
+    const priorEpoch = result.rows[0]?.epoch_start_ms;
+    return priorEpoch === undefined ? null : this.getCheckpoint(Number(priorEpoch), shard);
+  }
+
   async buildInclusionProofFor(treeKind: "event" | "receipt" | "attestation" | "revocation", commitment: Hex32): Promise<{
     proof: InclusionProofV1;
     checkpoint: BatchCheckpointV1;
@@ -905,6 +915,7 @@ export class PostgresRepository {
       event_count: Number(row.event_count),
       receipt_count: Number(row.receipt_count),
       previous_checkpoint: row.previous_checkpoint,
+      settlement_backend: row.settlement_backend ?? undefined,
       relay_id: row.relay_id,
       relay_signature: row.relay_signature
       };

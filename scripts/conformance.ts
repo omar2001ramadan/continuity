@@ -1,5 +1,7 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { canonicalBytes } from "../packages/core-ts/src/canonicalize";
 import { buildIdentityFromSeed, signMessageEvent } from "../packages/core-ts/src/commitments";
 import { commitmentHashFromParts, hashDomain, legacyCommitmentHashFromParts, sha256Hex, signEd25519, signReceipt } from "../packages/core-ts/src/crypto";
@@ -13,6 +15,7 @@ import {
   computeReferenceScoreV0,
   extractReferenceFeatureVectorV0,
 	  computeSybilAssessmentV0,
+	  runSybilSimulationProfileV1,
 	  constructGraphFromEvidenceV0,
 	  constructGraphV0,
 	  graphFeatureVectorV1Hash,
@@ -442,7 +445,7 @@ function checkErrorRegistry(): void {
   const codePattern = /TSL_[A-Z0-9_]+/g;
   const nonErrorCodePatterns = [
     /^TSL_.*_(ADDRESS|URL|URI|KEY|KEY_URI|SEED_HEX|PRIVATE_KEY|RPC_URL|DEPLOYMENT|OUT|COUNT|SAMPLES|CONCURRENCY|RETRIES|BATCH|BATCH_SIZE|RUN_ID|ID|IDS|TRUST_ID|CHAIN_ID|CONTRACTS|STREAMS|MS)$/,
-    /^TSL_(DATABASE_URL|EPOCH_MS|ENV_FILE|LOAD_ENV_IN_TESTS|TIMESTAMP_WINDOW_MS|GOSSIP_PEERS|LOG_CONSUMER_GROUP|RELAY_ID|RELAY_SIGNATURE|VERIFY_CONTRACTS|SCORING_PERSISTENCE|SCORING_ALLOW_MEMORY_STORE|NETWORK|DEV_SCORING_INPUTS|DEV_GRAPH_ARTIFACTS)$/
+    /^TSL_(DATABASE_URL|EPOCH_MS|ENV_FILE|LOAD_ENV_IN_TESTS|TIMESTAMP_WINDOW_MS|GOSSIP_PEERS|LOG_CONSUMER_GROUP|RELAY_ID|RELAY_SIGNATURE|AUTHORIZED_RELAYS|REQUIRE_AUTHORIZED_RELAY|VERIFY_CONTRACTS|SCORING_PERSISTENCE|SCORING_ALLOW_MEMORY_STORE|NETWORK|DEV_SCORING_INPUTS|DEV_SCORING_REGISTRATIONS|DEV_GRAPH_ARTIFACTS)$/
   ];
   for (const searchRoot of searchRoots) {
     const fullRoot = path.join(root, searchRoot);
@@ -469,7 +472,7 @@ function checkErrorRegistry(): void {
   }
 }
 
-function checkObject(entry: TraceabilityEntry): void {
+async function checkObject(entry: TraceabilityEntry): Promise<void> {
   const schemaPath = entry.schema_path;
   assert(fs.existsSync(path.join(root, schemaPath)), `Missing schema ${schemaPath}`);
 
@@ -489,7 +492,7 @@ function checkObject(entry: TraceabilityEntry): void {
   const input = readJson(`${vectorRoot}/input.json`) as Record<string, unknown>;
 	  const manifest = readJson(`${vectorRoot}/manifest.json`) as {
 	    object_type: string;
-	    expected: { schema_valid: boolean; canonical_hash: string; signature_valid?: boolean; error_code?: string | null };
+	    expected: { schema_valid: boolean; canonical_hash: string; signature_valid?: boolean; verifier_status?: boolean; error_code?: string | null };
 	  };
 	  assert("signature_valid" in manifest.expected, `${vectorRoot} manifest missing expected.signature_valid`);
 	  assert("error_code" in manifest.expected, `${vectorRoot} manifest missing expected.error_code`);
@@ -499,6 +502,27 @@ function checkObject(entry: TraceabilityEntry): void {
 	  const canonicalHash = hashDomain(String(input.type), canonicalBytes(input));
 	  assert(canonicalHash === manifest.expected.canonical_hash, `${vectorRoot} canonical hash mismatch`);
 	  if (typeof input.signature === "string") assert(input.signature.length > 0, `${vectorRoot} signed object has empty signature`);
+	  const verifyInputPath = path.join(root, vectorRoot, "verify_input.json");
+	  if (fs.existsSync(verifyInputPath)) {
+	    const verifyInput = JSON.parse(fs.readFileSync(verifyInputPath, "utf8"));
+	    const identitiesPath = path.join(root, vectorRoot, "identities.json");
+	    const identities = fs.existsSync(identitiesPath) ? JSON.parse(fs.readFileSync(identitiesPath, "utf8")) as Array<{ id: string }> : [];
+	    const identityMap = new Map<string, unknown>(identities.map((identity) => [identity.id, identity]));
+	    const verifyResult = await verifyTSL(
+	      verifyInput,
+	      { resolveTrustID: (trustId: string) => (identityMap.get(trustId) as never) ?? null },
+	      verifyInput.verifier_policy ?? {}
+	    );
+	    if ("verifier_status" in manifest.expected) {
+	      assert(verifyResult.verified === manifest.expected.verifier_status, `${vectorRoot} verifier status mismatch: ${verifyResult.errors.join("; ")}`);
+	    }
+	    if (manifest.expected.signature_valid !== undefined) {
+	      assert(Boolean(verifyResult.checks.signature_valid) === manifest.expected.signature_valid, `${vectorRoot} signature status mismatch`);
+	    }
+	    if (manifest.expected.error_code) {
+	      assert(verifyResult.errors.includes(manifest.expected.error_code), `${vectorRoot} missing expected error code ${manifest.expected.error_code}`);
+	    }
+	  }
 	}
 
 async function checkSemanticConformance(): Promise<void> {
@@ -531,6 +555,34 @@ async function checkSemanticConformance(): Promise<void> {
 		    checkpointHash({ ...checkpointBase, settlement_tx: "0xabc" }) === checkpointHash(checkpointBase),
 		    "Checkpoint identity hash must treat settlement_tx as post-settlement evidence"
 		  );
+		  const incompleteSettlementEvidence = {
+		    type: "tsl.settlement_evidence.v1",
+		    checkpoint_hash: checkpointHash({ ...checkpointBase, settlement_backend: "eip155:1" }),
+		    checkpoint_identity_hash: checkpointHash({ ...checkpointBase, settlement_backend: "eip155:1" }),
+		    settlement_backend: "eip155:1",
+		    chain_id: 1,
+		    contract_address: "0x0000000000000000000000000000000000000001",
+		    contract_checkpoint_fields_hash: fakeHash,
+		    settlement_tx: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		    evidence_kind: "offline_receipt_log_proof",
+		    transaction_receipt_hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		    block_hash: fakeHash,
+		    block_number: 1,
+		    receipt_root: fakeHash,
+		    transaction_index: 0,
+		    receipt_status: "success",
+		    settlement_event_hash: fakeHash,
+		    settlement_event_index: 0,
+		    event_topic_hash: fakeHash,
+		    log_index: 0,
+		    submitter: "0x0000000000000000000000000000000000000002",
+		    status: "settled",
+		    submitted_at: "2026-05-27T12:00:00Z",
+		    receipt_proof_source_commitment: fakeHash,
+		    finality_source_commitment: fakeHash,
+		    chain_proof_commitment: fakeHash
+		  };
+		  assert(!validateSchema("settlementEvidenceV1", incompleteSettlementEvidence).valid, "Settlement evidence must include offline receipt/log/finality proof fields");
 
 	  const bundleIdentity = buildIdentityFromSeed({ trust_id: "did:tsl:a", key_id: "#a", seed_hex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", created_at: "2026-01-01T00:00:00Z" });
 	  const bundleEvent = signMessageEvent({ sender: bundleIdentity.id, signing_key_id: "#a", seed_hex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", message: "bundle", timestamp: "2026-05-27T12:00:00Z" });
@@ -559,6 +611,48 @@ async function checkSemanticConformance(): Promise<void> {
 	  });
 	  assert(!redactedBundle.receipts?.length && !redactedBundle.attestations?.length, "Proof-bundle disclosure filter must redact receipts and private attestations without consent");
 	  assert(redactedBundle.redaction_manifest.metadata_fields_redacted.includes("exact_counterparties"), "Proof-bundle redaction manifest must reflect redacted counterparties");
+	  const falseManifestResult = await verifyTSL(
+	    {
+	      envelope: bundleEvent.envelope,
+	      message_disclosure: { raw_message: "bundle", content_salt: bundleEvent.content_salt },
+	      redaction_manifest: {
+	        raw_content_included: false,
+	        content_salt_included: false,
+	        exact_counterparties_included: false,
+	        metadata_fields_redacted: ["raw_content", "content_salt", "exact_counterparties", "private_graph", "private_metadata", "restricted_attestations"]
+	      }
+	    },
+	    { resolveTrustID: () => bundleIdentity }
+	  );
+	  assert(!falseManifestResult.verified && falseManifestResult.errors.includes("TSL_REDACTION_MANIFEST_INVALID"), "False redaction manifests must fail behavior conformance");
+	  const unsignedConsentBundle = filterProofBundleDisclosures(
+	    {
+	      ...redactedBundle,
+	      receipts: [bundleReceipt],
+	      redaction_manifest: { raw_content_included: false, exact_counterparties_included: false, metadata_fields_redacted: [] }
+	    },
+	    {
+	      include_receipts: true,
+	      verifier_or_provider: "did:tsl:verifier:conformance",
+	      disclosure_purpose: "verification_opening",
+	      consent_identities: [bundleIdentity],
+	      disclosure_consents: [
+	        {
+	          type: "tsl.disclosure_consent.v1",
+	          subject: bundleIdentity.id,
+	          verifier_or_provider: "did:tsl:verifier:conformance",
+	          allowed_field_classes: ["exact_counterparties"],
+	          forbidden_field_classes: [],
+	          purpose: "verification_opening",
+	          issued_at: "2026-05-27T00:00:00Z",
+	          expires_at: "2026-06-01T00:00:00Z",
+	          revocation_pointer: "rev:unsigned",
+	          signature: "0x00" as const
+	        }
+	      ]
+	    }
+	  );
+	  assert(!unsignedConsentBundle.receipts?.length, "Unsigned disclosure consent must not authorize proof-bundle export");
 
   const fullCoverage = computeEvidenceCoverageV0({
     subject: "did:tsl:a",
@@ -618,6 +712,15 @@ async function checkSemanticConformance(): Promise<void> {
   assert(likelyScore.label === "likely_trusted", `Likely-trusted label threshold mismatch: ${likelyScore.label}`);
   const sparseScore = computeReferenceScoreV0({ ...scoringBase, evidence_coverage: { ...partialCoverage, coverage_bps: 2000 }, normalized_features_bps: { trust: 10000 }, weights_bps: { trust: 4000 } });
   assert(sparseScore.label === "insufficient_evidence", `Sparse identity label mismatch: ${sparseScore.label}`);
+  const lowCoverageMedium = computeReferenceScoreV0({
+    ...scoringBase,
+    evidence_coverage: { ...partialCoverage, coverage_bps: 4000 },
+    normalized_features_bps: { trust: 10000 },
+    weights_bps: { trust: 6500 },
+    has_adverse_evidence: false
+  });
+  assert(lowCoverageMedium.label !== "medium_trust", "Low coverage without adverse evidence must not produce an ordinary medium_trust label");
+  assert((lowCoverageMedium.score_bps ?? 0) < 6500, "Reference score must include explicit coverage penalty");
   const noAdverseScore = computeReferenceScoreV0({ ...scoringBase, normalized_features_bps: { trust: 10000 }, weights_bps: { trust: 4000 }, has_adverse_evidence: false });
   const adverseScore = computeReferenceScoreV0({ ...scoringBase, normalized_features_bps: { trust: 10000 }, weights_bps: { trust: 4000 }, has_adverse_evidence: true });
   assert(noAdverseScore.label === "unknown_caution", `Suspicious label must require adverse evidence: ${noAdverseScore.label}`);
@@ -748,6 +851,58 @@ async function checkSemanticConformance(): Promise<void> {
   assert(vector.adversarial_proximity_bps === 6000, `Graph adversarial proximity mismatch: ${vector.adversarial_proximity_bps}`);
   assert(vector.community_escape_bps === 0, `Graph community escape mismatch: ${vector.community_escape_bps}`);
   assert(vector.pagerank_bps !== undefined && vector.trusted_seed_distance_bps !== undefined, "Graph vector missing PageRank/seed-distance fields");
+  const directedProfile = {
+    ...graphProfile,
+    profile_id: "graph-directed-projection",
+    community_detection: { ...graphProfile.community_detection, projection: "directed_outbound" as const }
+  };
+  const directedVector = computeGraphFeatureVectorV0({
+    subject: "did:tsl:a",
+    graph,
+    graph_profile_id: directedProfile.profile_id,
+    graph_profile: directedProfile,
+    trusted_seeds: ["did:tsl:c"],
+    adversarial_seeds: ["did:tsl:b"],
+    computed_at: "2026-05-27T12:00:00Z"
+  });
+  assert(directedVector.counterparty_hhi_bps !== vector.counterparty_hhi_bps, "Graph projection mode must change projected counterparty metrics");
+  const unsupportedManifoldProfile = {
+    ...graphProfile,
+    profile_id: "graph-manifold-missing-openings",
+    manifold_profile: {
+      algorithm: "centroid_covariance_v1" as const,
+      trusted_centroid_commitment: fakeHash,
+      adversarial_centroid_commitment: fakeHash,
+      cluster_centroid_commitment: fakeHash,
+      covariance_commitment: fakeHash
+    }
+  };
+  assertThrows(
+    () =>
+      computeGraphFeatureVectorV0({
+        subject: "did:tsl:a",
+        graph,
+        graph_profile_id: unsupportedManifoldProfile.profile_id,
+        graph_profile: unsupportedManifoldProfile,
+        trusted_seeds: ["did:tsl:c"],
+        adversarial_seeds: ["did:tsl:b"],
+        computed_at: "2026-05-27T12:00:00Z"
+      }),
+    "TSL_MANIFOLD_PROFILE_UNSUPPORTED"
+  );
+  const unsupportedVectorUnsigned = { ...vector, graph_profile_id: unsupportedManifoldProfile.profile_id };
+  const unsupportedVector = { ...unsupportedVectorUnsigned, signature: signEd25519(graphFeatureVectorV1Hash(unsupportedVectorUnsigned), aSeed) };
+  const unsupportedManifoldResult = await verifyTSL(
+    {
+      envelope: eventAB.envelope,
+      graph_profile: unsupportedManifoldProfile,
+      graph_feature_vector: unsupportedVector,
+      event_receivers: { [eventAB.commitment_hash]: b.id }
+    },
+    resolver,
+    { require_exact_graph_formulas: true }
+  );
+  assert(!unsupportedManifoldResult.verified && unsupportedManifoldResult.errors.includes("TSL_MANIFOLD_PROFILE_UNSUPPORTED"), "Centroid/covariance manifold claims must require recomputable profile openings");
   assertThrows(() => constructGraphV0({ edges: [] } as never), "Protocol graph construction must reject raw-edge inputs");
   const tamperedVectorUnsigned = { ...vector, feature_commitment: fakeHash, cluster_concentration_bps: 9999, signature: "0x00" as const };
   const tamperedVector = { ...tamperedVectorUnsigned, signature: signEd25519(graphFeatureVectorV1Hash(tamperedVectorUnsigned), aSeed) };
@@ -817,6 +972,55 @@ async function checkSemanticConformance(): Promise<void> {
     computed_at: "2026-05-27T12:00:00Z"
   });
   assert(b5Sybil.risk_label === "high" && b5Sybil.scenario_evidence_checks?.includes("settlement_anomaly"), "B5 Sybil conformance must consume infrastructure-collusion evidence");
+  assertThrows(
+    () =>
+      runSybilSimulationProfileV1({
+        profile: {
+          type: "tsl.sybil_simulation_profile.v1",
+          profile_id: "sybil-simulation-conformance",
+          issuer: "did:tsl:provider:sybil",
+          graph_profile_id: graphProfile.profile_id,
+          issued_at: "2026-05-27T12:00:00Z",
+          scenarios: [
+            {
+              scenario_id: "b4-missing-evidence",
+              adversary_tier: "B4",
+              subject: "did:tsl:a",
+              attack_scenario: "issuer_collusion",
+              expected_benefit_minor_units: 100000,
+              evidence_commitment: fakeHash
+            }
+          ]
+        },
+        graph,
+        graph_profile: graphProfile
+      }),
+    "TSL_SYBIL_EVIDENCE_INCOMPLETE"
+  );
+  const simulation = runSybilSimulationProfileV1({
+    profile: {
+      type: "tsl.sybil_simulation_profile.v1",
+      profile_id: "sybil-simulation-conformance",
+      issuer: "did:tsl:provider:sybil",
+      graph_profile_id: graphProfile.profile_id,
+      issued_at: "2026-05-27T12:00:00Z",
+      scenarios: [
+        {
+          scenario_id: "b4-collusion",
+          adversary_tier: "B4",
+          subject: "did:tsl:a",
+          attack_scenario: "issuer_collusion",
+          expected_benefit_minor_units: 100000,
+          evidence_commitment: fakeHash,
+          issuer_collusion_evidence: { evidence_commitment: fakeHash, issuer_reversal_count: 2, low_quality_issuer_count: 2, false_attestation_count: 2, collusion_indicator_count: 2 }
+        }
+      ]
+    },
+    graph,
+    graph_profile: graphProfile,
+    computed_at: "2026-05-27T12:00:00Z"
+  });
+  assert(simulation[0].adversary_tier_assumed === "B4" && simulation[0].issuer_collusion_evidence?.collusion_indicator_count === 2, "Sybil simulation profile must produce evidence-derived B4 assessment");
 
   const drift = computeDriftReportV0({
     subject: "did:tsl:a",
@@ -975,23 +1179,35 @@ async function checkGraphResearchConformance(): Promise<void> {
 }
 
 async function checkZkProductionConformance(): Promise<void> {
-  for (const circuit of [
-    "circuits/identity_age_threshold.circom",
-    "circuits/reciprocal_receipt_count_threshold.circom",
-    "circuits/revocation_set_non_membership.circom",
-    "circuits/agent_scope_compliance.circom"
-  ]) {
-    assert(fs.existsSync(path.join(root, circuit)), `Production ZK circuit source missing: ${circuit}`);
-  }
-  const circuitWitnessFields: Record<string, string[]> = {
-    "circuits/identity_age_threshold.circom": ["creation_epoch_day", "current_epoch_day", "registry_path", "public_registry_root"],
-    "circuits/reciprocal_receipt_count_threshold.circom": ["receipt_leaves", "receipt_salts", "counterparty_commitments", "public_receipt_root"],
-    "circuits/revocation_set_non_membership.circom": ["empty_leaf_commitment", "sibling_path", "leaf_index_bits", "public_revocation_root"],
-    "circuits/agent_scope_compliance.circom": ["parameter_values_hash", "delegation_path", "delegation_chain_root", "human_approval_required"]
+  const productionCircuitWitnessFields: Record<string, string[]> = {
+    "circuits/production_identity_age_threshold.circom": ["creation_epoch_day", "registry_salt", "registry_siblings", "registry_path_bits", "public_registry_root", "Poseidon"],
+    "circuits/production_receipt_count_threshold.circom": ["receipt_leaves", "receipt_salts", "counterparty_commitments", "receipt_siblings", "receipt_path_bits", "public_receipt_root", "Poseidon"],
+    "circuits/production_dispute_rate_bound.circom": ["completed_leaves", "disputed_leaves", "completed_siblings", "disputed_siblings", "max_dispute_rate_bps", "Poseidon"],
+    "circuits/production_set_membership.circom": ["membership_salt", "membership_siblings", "membership_path_bits", "public_set_root", "Poseidon"],
+    "circuits/production_revocation_non_membership.circom": ["revocation_pointer_hash", "value_commitment", "empty_leaf_commitment", "sibling_path", "sparse_leaf_index", "public_revocation_root", "Poseidon"],
+    "circuits/production_organization_membership.circom": ["org_hash", "issuer_hash", "attestation_siblings", "issuer_siblings", "public_attestation_root", "issuer_registry_root", "Poseidon"],
+    "circuits/production_delegation_scope.circom": ["parameter_values_hash", "policy_constraints_hash", "delegation_siblings", "delegation_chain_root", "human_approval_required", "Poseidon"],
+    "circuits/production_private_graph_distance.circom": ["committed_local_neighborhood_root", "trusted_seed_commitment", "adversarial_seed_commitment", "aggregate_proof_commitment", "local_edge_weights_bps", "Poseidon"]
   };
+  for (const circuit of Object.keys(productionCircuitWitnessFields)) {
+    assert(fs.existsSync(path.join(root, circuit)), `Production ZK interface circuit source missing: ${circuit}`);
+  }
+  const circuitWitnessFields = productionCircuitWitnessFields;
   for (const [circuit, fields] of Object.entries(circuitWitnessFields)) {
     const source = fs.readFileSync(path.join(root, circuit), "utf8");
     for (const field of fields) assert(source.includes(field), `${circuit} missing witness-faithful field ${field}`);
+    assert(!source.includes("1315423911") && !source.includes("2654435761"), `${circuit} must not use dev linear-hash constants`);
+  }
+  const compileDir = fs.mkdtempSync(path.join(os.tmpdir(), "tsl-zk-production-"));
+  try {
+    for (const circuit of Object.keys(circuitWitnessFields)) {
+      execFileSync("npx", ["circom2", path.join(root, circuit), "--r1cs", "--wasm", "--sym", "-o", compileDir], {
+        cwd: root,
+        stdio: "pipe"
+      });
+    }
+  } finally {
+    fs.rmSync(compileDir, { recursive: true, force: true });
   }
   const verificationKey = { protocol: "groth16", curve: "bn128", alpha_g1: ["1", "2"], beta_g2: [["1", "2"], ["3", "4"]] };
   const verificationKeyHash = zkVerificationKeyObjectHash(verificationKey);
@@ -1001,6 +1217,8 @@ async function checkZkProductionConformance(): Promise<void> {
     circuit_id: "tsl.identity_age_days.production_interface.v1",
     claim: "identity_age_days" as const,
     version: "1.0.0",
+    hash_suite: "poseidon-bn254-v1",
+    witness_interface: "identity_age_days.production_witness.v1",
     circuit_hash: sha256Hex("circuit"),
     r1cs_hash: sha256Hex("r1cs"),
     wasm_hash: sha256Hex("wasm"),
@@ -1063,7 +1281,7 @@ checkArtifactTree();
 checkCoreArchitectureRequiredShapes();
 checkErrorRegistry();
 for (const level of levels) {
-  for (const entry of requiredByLevel[level] ?? []) checkObject(entry);
+  for (const entry of requiredByLevel[level] ?? []) await checkObject(entry);
 }
 await checkSemanticConformance();
 if (requestedLevel === "graph-research" || requestedLevel === "spec" || requestedLevel === "all") await checkGraphResearchConformance();

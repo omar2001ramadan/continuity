@@ -20,6 +20,7 @@ import {
   proveSparseMerkleInclusion,
   proveSparseMerkleNonMembership,
   verifySparseMerkleProof,
+  validateCheckpointImport,
   verifyThresholdProofAsync,
   zkCircuitReleaseManifestHash,
   zkProofUsesRegisteredCircuit,
@@ -27,6 +28,7 @@ import {
   type SettlementBackend
 } from "./index";
 import { InMemoryRelayStore, RelayValidationError } from "./relayStore";
+import { createSignedMessageProof } from "../../client-sdk-ts/src/index";
 import type { BatchCheckpointV1, DelegationPolicyV2, Hex32 } from "./types";
 import {
 	  buildAgentActionV2,
@@ -38,6 +40,7 @@ import {
   computeMetadataFingerprintCommitmentV0,
   computeReferenceScoreV0,
   computeSybilAssessmentV0,
+  runSybilSimulationProfileV1,
   constructGraphFromEvidenceV0,
   constructGraphFromRawEdgesForTestV0,
   constructGraphV0,
@@ -263,6 +266,64 @@ describe("semantic compliance hardening", () => {
 	  expect(filtered.redaction_manifest.metadata_fields_redacted).toContain("exact_counterparties");
 	  expect(filtered.redaction_manifest.metadata_fields_redacted).toContain("restricted_attestations");
 	});
+
+  it("redacts SDK proof-link raw disclosure unless consent is signed and bound to verifier and purpose", () => {
+    const rawRequested = createSignedMessageProof({
+      trust_id: "did:tsl:test:alice",
+      key_id: "#alice",
+      seed_hex: aliceSeed,
+      message: "sdk-secret",
+      include_message_disclosure: true,
+      verifier_or_provider: "did:tsl:verifier:test",
+      purpose: "verification_opening"
+    });
+    expect(rawRequested.message_disclosure).toBeUndefined();
+    expect(rawRequested.redaction_manifest.raw_content_included).toBe(false);
+    expect(rawRequested.redaction_manifest.metadata_fields_redacted).toContain("raw_content");
+
+    const unsignedConsent = {
+      type: "tsl.disclosure_consent.v1" as const,
+      subject: "did:tsl:test:alice",
+      verifier_or_provider: "did:tsl:verifier:test",
+      allowed_field_classes: ["raw_content", "content_salt"],
+      forbidden_field_classes: [],
+      purpose: "verification_opening",
+      issued_at: "2026-01-01T00:00:00Z",
+      expires_at: "2026-06-01T00:00:00Z",
+      revocation_pointer: "sdk-consent"
+    };
+    const signedConsent = {
+      ...unsignedConsent,
+      signature: signEd25519(disclosureConsentV1Hash({ ...unsignedConsent, signature: "0x00" }), aliceSeed)
+    };
+    const identity = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#alice", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
+    const disclosed = createSignedMessageProof({
+      trust_id: "did:tsl:test:alice",
+      key_id: "#alice",
+      seed_hex: aliceSeed,
+      message: "sdk-secret",
+      include_message_disclosure: true,
+      disclosure_consent: signedConsent,
+      consent_identities: [identity],
+      verifier_or_provider: "did:tsl:verifier:test",
+      purpose: "verification_opening"
+    });
+    expect(disclosed.message_disclosure?.raw_message).toBe("sdk-secret");
+    expect(disclosed.redaction_manifest.raw_content_included).toBe(true);
+
+    const wrongPurpose = createSignedMessageProof({
+      trust_id: "did:tsl:test:alice",
+      key_id: "#alice",
+      seed_hex: aliceSeed,
+      message: "sdk-secret",
+      include_message_disclosure: true,
+      disclosure_consent: signedConsent,
+      consent_identities: [identity],
+      verifier_or_provider: "did:tsl:verifier:test",
+      purpose: "scoring_upload"
+    });
+    expect(wrongPurpose.message_disclosure).toBeUndefined();
+  });
 
 	  it("requires consent for bundled receipts, private attestations, and redaction-manifest accuracy", async () => {
 	    const alice = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#alice", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
@@ -631,6 +692,51 @@ describe("semantic compliance hardening", () => {
 	    expect(collusive.infrastructure_collusion_evidence?.evidence_commitment).toBe(zero);
 	    expect(collusive.scenario_evidence_checks).toContain("settlement_anomaly");
 
+	    const simulationProfile = {
+	      type: "tsl.sybil_simulation_profile.v1" as const,
+	      profile_id: "sybil-sim-test",
+	      issuer: "did:tsl:provider:sim",
+	      graph_profile_id: "graph-default-rc4",
+	      issued_at: at,
+	      scenarios: [
+	        {
+	          scenario_id: "b3-missing",
+	          adversary_tier: "B3" as const,
+	          subject: "did:tsl:a",
+	          attack_scenario: "compromised_identity",
+	          expected_benefit_minor_units: 100000,
+	          evidence_commitment: zero
+	        }
+	      ]
+	    };
+	    const simulationGraphProfile = {
+	      type: "tsl.graph_profile.v2" as const,
+	      profile_id: "graph-default-rc4",
+	      edge_weight_profile: "default",
+	      temporal_decay_profile: "none",
+	      community_detection: { algorithm: "connected_components" as const, resolution_bps: 10000, min_cluster_size: 1 },
+	      seed_sets: { trusted_seed_commitment: zero, adversarial_seed_commitment: zero },
+	      negative_edge_policy: { requires_evidence_commitment: true, requires_appeal_uri: true, max_single_negative_weight_bps: 1500, decay_days: 30 },
+	      privacy_policy: { raw_counterparty_upload_required: false, allows_pairwise_private_features: true }
+	    };
+	    expect(() => runSybilSimulationProfileV1({ profile: simulationProfile, graph, graph_profile: simulationGraphProfile, computed_at: at })).toThrow("TSL_SYBIL_EVIDENCE_INCOMPLETE");
+	    const simulated = runSybilSimulationProfileV1({
+	      profile: {
+	        ...simulationProfile,
+	        scenarios: [
+	          {
+	            ...simulationProfile.scenarios[0],
+	            compromise_evidence: { evidence_commitment: zero, key_revocation_count: 2, severe_drift_count: 1, recovery_anomaly_count: 1 }
+	          }
+	        ]
+	      },
+	      graph,
+	      graph_profile: simulationGraphProfile,
+	      computed_at: at
+	    });
+	    expect(simulated[0].adversary_tier_assumed).toBe("B3");
+	    expect(simulated[0].compromise_evidence?.key_revocation_count).toBe(2);
+
 	    const drift = computeDriftReportV0({
       subject: "did:tsl:a",
       feature_history: [
@@ -782,7 +888,7 @@ describe("semantic compliance hardening", () => {
 	      raw_content_included: true,
 	      content_salt_included: true,
 	      exact_counterparties_included: false,
-	      metadata_fields_redacted: ["exact_counterparties", "platform", "ip_address", "user_agent"]
+	      metadata_fields_redacted: ["exact_counterparties", "private_graph", "private_metadata", "restricted_attestations"]
 	    };
 	    const accepted = await verifyTSL(
 	      {
@@ -844,6 +950,8 @@ describe("semantic compliance hardening", () => {
       circuit_id: "tsl.identity_age_days.production_interface.v1",
       claim: "identity_age_days" as const,
       version: "1.0.0",
+      hash_suite: "poseidon-bn254-v1",
+      witness_interface: "identity_age_days.production_witness.v1",
       circuit_hash: sha256Hex("circuit"),
       r1cs_hash: sha256Hex("r1cs"),
       wasm_hash: sha256Hex("wasm"),
@@ -994,6 +1102,55 @@ describe("semantic compliance hardening", () => {
     );
     expect(missingRelay.verified).toBe(false);
     expect(missingRelay.errors).toContain("TSL_CHECKPOINT_SIGNATURE_INVALID");
+  });
+
+  it("rejects gossip checkpoint imports with invalid relay signatures or chain continuity", async () => {
+    const relay = buildIdentityFromSeed({ trust_id: "did:tsl:relay:test", key_id: "#relay", seed_hex: relaySeed, created_at: "2026-01-01T00:00:00Z" });
+    const previousBase: BatchCheckpointV1 = {
+      type: "tsl.batch_checkpoint.v1",
+      epoch_start_ms: Date.parse(at) - 300000,
+      epoch_duration_ms: 300000,
+      shard: "0001",
+      event_root: sha256Hex("prev-event") as Hex32,
+      receipt_root: zero,
+      attestation_root: zero,
+      revocation_root: zero,
+      event_count: 1,
+      receipt_count: 0,
+      previous_checkpoint: zero,
+      relay_id: relay.id,
+      relay_signature: "0x00"
+    };
+    const previous = { ...previousBase, relay_signature: signEd25519(checkpointHash(previousBase), relaySeed) };
+    const checkpointBase: BatchCheckpointV1 = {
+      ...previousBase,
+      epoch_start_ms: Date.parse(at),
+      event_root: sha256Hex("next-event") as Hex32,
+      previous_checkpoint: checkpointHash(previous)
+    };
+    const checkpoint = { ...checkpointBase, relay_signature: signEd25519(checkpointHash(checkpointBase), relaySeed) };
+    const accepted = await validateCheckpointImport({
+      checkpoint,
+      previous_checkpoint: previous,
+      resolver: { resolveTrustID: () => relay }
+    });
+    expect(accepted.ok).toBe(true);
+
+    const invalidSignature = await validateCheckpointImport({
+      checkpoint: { ...checkpoint, relay_signature: "0x00" },
+      previous_checkpoint: previous,
+      resolver: { resolveTrustID: () => relay }
+    });
+    expect(invalidSignature.ok).toBe(false);
+    expect(invalidSignature.errors).toContain("TSL_CHECKPOINT_SIGNATURE_INVALID");
+
+    const brokenChain = await validateCheckpointImport({
+      checkpoint: { ...checkpoint, previous_checkpoint: zero },
+      previous_checkpoint: previous,
+      resolver: { resolveTrustID: () => relay }
+    });
+    expect(brokenChain.ok).toBe(false);
+    expect(brokenChain.errors).toContain("TSL_CHECKPOINT_CHAIN_BROKEN");
   });
 
   it("accepts zero checkpoint signatures only under explicit unsafe fixture mode", async () => {

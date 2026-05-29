@@ -10,19 +10,33 @@
     "contract_address",
     "contract_checkpoint_fields_hash",
     "settlement_tx",
+    "evidence_kind",
     "transaction_receipt_hash",
     "block_hash",
     "block_number",
+    "receipt_root",
+    "transaction_index",
     "receipt_status",
     "chain_proof_commitment",
     "settlement_event_hash",
     "settlement_event_index",
+    "event_topic_hash",
+    "log_index",
     "receipt_proof_source_commitment",
+    "finality_source_commitment",
     "submitter",
     "submitted_at",
     "status"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "evidence_kind": { "const": "offline_receipt_log_proof" } } },
+      "then": {
+        "required": ["block_header_rlp", "receipt_rlp", "receipt_proof_nodes", "finality_proof"]
+      }
+    }
+  ],
   "properties": {
     "type": { "const": "tsl.settlement_evidence.v1" },
     "checkpoint_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
@@ -33,14 +47,38 @@
     "contract_checkpoint_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
     "contract_checkpoint_fields_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
     "settlement_tx": { "type": "string", "minLength": 1 },
+    "evidence_kind": { "enum": ["offline_receipt_log_proof", "rpc_attested_receipt"] },
+    "block_header_rlp": { "type": "string", "pattern": "^0x[0-9a-fA-F]*$" },
+    "receipt_rlp": { "type": "string", "pattern": "^0x[0-9a-fA-F]*$" },
+    "receipt_proof_nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^0x[0-9a-fA-F]*$" }
+    },
+    "finality_proof": {
+      "type": "object",
+      "required": ["type", "source_commitment"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["finalized_block", "confirmations", "checkpoint_oracle"] },
+        "finalized_block_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+        "confirmations": { "type": "integer", "minimum": 0 },
+        "source_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" }
+      }
+    },
     "transaction_receipt_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
     "block_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
     "block_number": { "type": "integer", "minimum": 0 },
+    "receipt_root": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "transaction_index": { "type": "integer", "minimum": 0 },
     "receipt_status": { "enum": ["success", "reverted", "unknown"] },
     "chain_proof_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
     "settlement_event_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
     "settlement_event_index": { "type": "integer", "minimum": 0 },
+    "event_topic_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "log_index": { "type": "integer", "minimum": 0 },
     "receipt_proof_source_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "finality_source_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
     "submitter": { "type": "string", "minLength": 1 },
     "submitted_at": { "type": "string", "format": "date-time" },
     "status": { "enum": ["submitted", "settled", "failed"] }

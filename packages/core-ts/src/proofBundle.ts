@@ -1,32 +1,55 @@
 import type {
   AttestationV1,
   DisclosureConsentV1,
+  IdentityDocumentV1,
   ProofBundleV1,
   TrustID
 } from "./types";
+import { keyActiveAt, notRevokedAt } from "./identity";
+import { verifyEd25519 } from "./crypto";
+import { validateSchema } from "./validation";
+import { disclosureConsentV1Hash } from "./v2";
 
 export interface ProofBundleDisclosureOptions {
   disclosure_consents?: DisclosureConsentV1[];
+  consent_identities?: IdentityDocumentV1[];
+  resolve_identity?: (trustId: TrustID, atTime?: string) => IdentityDocumentV1 | null | undefined;
   include_receipts?: boolean;
   include_attestations?: boolean;
   verifier_or_provider?: TrustID;
   purpose?: string;
+  disclosure_purpose?: string;
   at_time_ms?: number;
   revoked_disclosure_pointers?: string[];
+}
+
+function resolveConsentIdentity(subject: TrustID, options: ProofBundleDisclosureOptions, atTime?: string): IdentityDocumentV1 | null {
+  return options.resolve_identity?.(subject, atTime) ?? options.consent_identities?.find((identity) => identity.id === subject) ?? null;
+}
+
+function consentSignatureValid(consent: DisclosureConsentV1, options: ProofBundleDisclosureOptions): boolean {
+  const validation = validateSchema("disclosureConsentV1", consent);
+  if (!validation.valid) return false;
+  const identity = resolveConsentIdentity(consent.subject, options, consent.issued_at);
+  const key = identity?.verification_methods.find((method) => method.type === "ed25519" && keyActiveAt(method, consent.issued_at) && notRevokedAt(method, consent.issued_at));
+  return Boolean(key && verifyEd25519(key.public_key, disclosureConsentV1Hash(consent), consent.signature));
 }
 
 function consentAllows(input: {
   consents?: DisclosureConsentV1[];
   subject: TrustID;
   field_classes: string[];
+  options: ProofBundleDisclosureOptions;
   verifier_or_provider?: TrustID;
   purpose?: string;
   at_time_ms?: number;
   revoked_disclosure_pointers?: string[];
 }): boolean {
   const at = input.at_time_ms ?? Date.now();
+  if (!input.verifier_or_provider || !input.purpose) return false;
   for (const consent of input.consents ?? []) {
     if (consent.subject !== input.subject) continue;
+    if (!consentSignatureValid(consent, input.options)) continue;
     if (input.verifier_or_provider && consent.verifier_or_provider !== input.verifier_or_provider) continue;
     if (input.purpose && consent.purpose !== input.purpose) continue;
     if (Date.parse(consent.issued_at) > at || Date.parse(consent.expires_at) <= at) continue;
@@ -47,8 +70,9 @@ export function proofBundleAllowsFieldClass(
     consents: options.disclosure_consents,
     subject,
     field_classes: fieldClasses,
+    options,
     verifier_or_provider: options.verifier_or_provider,
-    purpose: options.purpose,
+    purpose: options.purpose ?? options.disclosure_purpose,
     at_time_ms: options.at_time_ms,
     revoked_disclosure_pointers: options.revoked_disclosure_pointers
   });

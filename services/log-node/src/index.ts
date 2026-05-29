@@ -4,11 +4,13 @@ import {
   createPostgresRepositoryFromEnv,
   createQueueFromEnv,
   receiptCommitmentHash,
+  validateCheckpointImport,
   type AttestationV1,
   QUEUE_TOPICS,
   type QueueTopic,
   type EventCommitmentV1,
   type BatchCheckpointV1,
+  type IdentityDocumentV1,
   type ReceiptCommitmentV1,
   type RevocationV1
 } from "../../../packages/core-ts/src/index";
@@ -31,6 +33,40 @@ export function createLogNode() {
 
   async function listPeers(): Promise<string[]> {
     return repo ? (await requireRepo()).listGossipPeers() : [...peers];
+  }
+
+  function authorizedRelays(): string[] | undefined {
+    const relays = (process.env.TSL_AUTHORIZED_RELAYS ?? "").split(",").map((relay) => relay.trim()).filter(Boolean);
+    return relays.length ? relays : undefined;
+  }
+
+  async function validateAndInsertCheckpoint(db: Awaited<ReturnType<typeof requireRepo>>, checkpoint: BatchCheckpointV1, body: Record<string, unknown>): Promise<string> {
+    const identities = [
+      body.identity,
+      body.relay_identity,
+      ...(Array.isArray(body.identities) ? body.identities : [])
+    ].filter(Boolean) as IdentityDocumentV1[];
+    const identityMap = new Map(identities.map((identity) => [identity.id, identity]));
+    const existing = await db.getCheckpoint(checkpoint.epoch_start_ms, checkpoint.shard);
+    const previous = await db.getLatestCheckpointBefore(checkpoint.epoch_start_ms, checkpoint.shard);
+    const validation = await validateCheckpointImport({
+      checkpoint,
+      existing_checkpoint: existing,
+      previous_checkpoint: previous,
+      authorized_relays: authorizedRelays(),
+      require_authorized_relay: process.env.TSL_REQUIRE_AUTHORIZED_RELAY === "true",
+      require_settlement_evidence_for_settled: true,
+      settlement_evidence: (body.settlement_evidence ?? body.settlement_evidences) as never,
+      resolver: {
+        resolveTrustID: async (trustId: string, atTime?: string) => identityMap.get(trustId) ?? db.getIdentity(trustId)
+      },
+      at_time: new Date(checkpoint.epoch_start_ms).toISOString()
+    });
+    if (!validation.ok) {
+      throw new Error(`${validation.error_code ?? "TSL_CHECKPOINT_IMPORT_INVALID"}:${validation.errors.join(",")}`);
+    }
+    await db.insertCheckpoint(checkpoint, checkpoint.settlement_tx ? "settled" : "pending");
+    return validation.checkpoint_hash!;
   }
 
   const app = express();
@@ -152,8 +188,8 @@ export function createLogNode() {
     try {
       const db = await requireRepo();
       const checkpoint = req.body.checkpoint as BatchCheckpointV1;
-      await db.insertCheckpoint(checkpoint, checkpoint.settlement_tx ? "settled" : "pending");
-      res.json({ status: "accepted" });
+      const checkpoint_hash = await validateAndInsertCheckpoint(db, checkpoint, req.body);
+      res.json({ status: "accepted", checkpoint_hash });
     } catch (error) {
       sendError(res, "TSL_GOSSIP_CHECKPOINT_REJECTED", error);
     }
@@ -163,20 +199,8 @@ export function createLogNode() {
     try {
       const db = await requireRepo();
       const incoming = req.body.checkpoint as BatchCheckpointV1;
-      const existing = await db.getCheckpoint(Number(incoming.epoch_start_ms), String(incoming.shard));
-      const conflict =
-        existing &&
-        (existing.event_root !== incoming.event_root ||
-          existing.receipt_root !== incoming.receipt_root ||
-          existing.attestation_root !== incoming.attestation_root ||
-          existing.revocation_root !== incoming.revocation_root ||
-          existing.previous_checkpoint !== incoming.previous_checkpoint);
-      if (conflict) {
-        res.status(409).json({ status: "rejected", conflict: true, existing, incoming });
-        return;
-      }
-      await db.insertCheckpoint(incoming, incoming.settlement_tx ? "settled" : "pending");
-      res.json({ status: "accepted", conflict: false });
+      const checkpoint_hash = await validateAndInsertCheckpoint(db, incoming, req.body);
+      res.json({ status: "accepted", conflict: false, checkpoint_hash });
     } catch (error) {
       sendError(res, "TSL_GOSSIP_CHECKPOINT_SUMMARY_REJECTED", error);
     }
@@ -228,13 +252,14 @@ export function createLogNode() {
           for (const row of payload.checkpoints ?? []) {
             const checkpoint = await fetch(`${base}/v1/gossip/checkpoints/${row.epoch_start_ms}/${row.shard}`);
             if (!checkpoint.ok) continue;
-            const imported = await checkpoint.json() as BatchCheckpointV1;
-            const existing = await db.getCheckpoint(imported.epoch_start_ms, imported.shard);
-            if (existing && existing.event_root !== imported.event_root) {
+            const checkpointPayload = await checkpoint.json() as Record<string, unknown>;
+            const imported = (checkpointPayload.checkpoint ?? checkpointPayload) as BatchCheckpointV1;
+            try {
+              await validateAndInsertCheckpoint(db, imported, checkpointPayload);
+            } catch {
               conflicts.push({ peer: peerUrl, epoch_start_ms: imported.epoch_start_ms, shard: imported.shard });
               continue;
             }
-            await db.insertCheckpoint(imported, imported.settlement_tx ? "settled" : "pending");
             imported_checkpoints += 1;
           }
         }

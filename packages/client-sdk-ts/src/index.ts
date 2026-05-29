@@ -3,10 +3,13 @@ import {
   signMessageEvent,
   buildIdentityFromSeed,
   buildInclusionProof,
-	  ZERO_HASH,
-	  type DisclosureConsentV1,
-	  type ProofBundleV1
-	} from "../../core-ts/src/index";
+  filterProofBundleDisclosures,
+  ZERO_HASH,
+  type DisclosureConsentV1,
+  type IdentityDocumentV1,
+  type ProofBundleV1,
+  type TrustID
+} from "../../core-ts/src/index";
 
 export function encodeProofLink(bundle: ProofBundleV1, baseUrl = "http://localhost:8090/p/"): string {
   const payload = Buffer.from(JSON.stringify(bundle), "utf8").toString("base64url");
@@ -25,6 +28,11 @@ export function createSignedMessageProof(input: {
   message: string;
   include_message_disclosure?: boolean;
   disclosure_consent?: DisclosureConsentV1;
+  consent_identities?: IdentityDocumentV1[];
+  verifier_or_provider?: TrustID;
+  purpose?: string;
+  disclosure_purpose?: string;
+  revoked_disclosure_pointers?: string[];
 }): ProofBundleV1 & { proof_link: string } {
   const identity = buildIdentityFromSeed({ trust_id: input.trust_id, key_id: input.key_id, seed_hex: input.seed_hex });
   const signed = signMessageEvent({
@@ -43,13 +51,6 @@ export function createSignedMessageProof(input: {
     epoch_duration_ms: epochDurationMs,
     shard: "local"
   });
-  const mayDiscloseMessage =
-    input.include_message_disclosure === true &&
-    disclosureConsentAllows({
-      consent: input.disclosure_consent,
-      subject: input.trust_id,
-      field_classes: ["raw_content", "content_salt"]
-    });
   const bundle: ProofBundleV1 = {
     type: "tsl.proof_bundle.v1",
     bundle_id: signed.commitment_hash,
@@ -71,24 +72,35 @@ export function createSignedMessageProof(input: {
       previous_checkpoint: ZERO_HASH,
       relay_id: "did:tsl:relay:local",
       relay_signature: "0x00"
-	    },
-	    redaction_manifest: {
-	      raw_content_included: mayDiscloseMessage,
-	      exact_counterparties_included: false,
-	      metadata_fields_redacted: mayDiscloseMessage ? ["platform", "ip_address", "user_agent"] : ["raw_content", "content_salt", "platform", "ip_address", "user_agent"]
-	    },
-	    local_disclosure_warnings: ["local_unsigned_fixture_checkpoint"],
-		    ...(mayDiscloseMessage
-		      ? {
-		          disclosure_consents: input.disclosure_consent ? [input.disclosure_consent] : undefined,
-		          message_disclosure: {
-		            raw_message: input.message,
-		            content_salt: signed.content_salt
-	          }
-	        }
-	      : {})
-	  };
-  return { ...bundle, proof_link: encodeProofLink(bundle) };
+    },
+    redaction_manifest: {
+      raw_content_included: false,
+      content_salt_included: false,
+      exact_counterparties_included: false,
+      metadata_fields_redacted: ["raw_content", "content_salt", "platform", "ip_address", "user_agent"]
+    },
+    local_disclosure_warnings: ["local_unsigned_fixture_checkpoint"],
+    ...(input.disclosure_consent ? { disclosure_consents: [input.disclosure_consent] } : {}),
+    ...(input.include_message_disclosure
+      ? {
+          message_disclosure: {
+            raw_message: input.message,
+            content_salt: signed.content_salt
+          }
+        }
+      : {})
+  };
+  const filtered = filterProofBundleDisclosures(bundle, {
+    disclosure_consents: input.disclosure_consent ? [input.disclosure_consent] : [],
+    consent_identities: input.consent_identities ?? [identity],
+    verifier_or_provider: input.verifier_or_provider,
+    purpose: input.purpose ?? input.disclosure_purpose,
+    at_time_ms: Date.parse(signed.envelope.timestamp),
+    revoked_disclosure_pointers: input.revoked_disclosure_pointers,
+    include_receipts: false,
+    include_attestations: false
+  });
+  return { ...filtered, proof_link: encodeProofLink(filtered) };
 }
 
 export function disclosureConsentAllows(input: {

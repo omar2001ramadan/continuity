@@ -6,6 +6,8 @@
     "circuit_id",
     "claim",
     "version",
+    "hash_suite",
+    "witness_interface",
     "circuit_hash",
     "r1cs_hash",
     "wasm_hash",

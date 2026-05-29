@@ -17,6 +17,7 @@ export interface BuildGroth16ThresholdProofInput extends BuildThresholdProofInpu
   circuit_id?: string;
   verification_key_id?: string;
   release_manifest_hash?: Hex32;
+  production_circuit_input?: Record<string, unknown>;
   receipt_leaves?: string[];
   receipt_salts?: string[];
   counterparty_commitments?: string[];
@@ -95,7 +96,20 @@ export async function buildGroth16ThresholdProof(input: BuildGroth16ThresholdPro
   const zeroPath = ["0", "0", "0", "0"];
   const zeroBits = [0, 0, 0, 0];
   let circuitInput: Record<string, unknown>;
-  if (input.claim === "identity_age_days") {
+  if (input.production_circuit_input) {
+    circuitInput = {
+      subject_hash: subjectHash,
+      threshold: input.threshold,
+      threshold_days: input.threshold,
+      threshold_count: input.threshold,
+      max_dispute_rate_bps: input.threshold,
+      threshold_distance_bps: input.threshold,
+      current_epoch_day: input.value,
+      ...input.production_circuit_input
+    };
+    const missing = requiredProductionCircuitInputs(input.claim).filter((field) => !(field in circuitInput));
+    if (missing.length > 0) throw new Error(`TSL_ZK_WITNESS_INTERFACE_INCOMPLETE:${missing.join(",")}`);
+  } else if (input.claim === "identity_age_days") {
     circuitInput = {
       creation_epoch_day: 0,
       current_epoch_day: input.value,
@@ -120,6 +134,7 @@ export async function buildGroth16ThresholdProof(input: BuildGroth16ThresholdPro
     circuitInput = {
       reciprocal_receipt_count: input.value,
       threshold: input.threshold,
+      threshold_count: input.threshold,
       subject_hash: subjectHash,
       receipt_leaves: receiptLeaves,
       receipt_salts: receiptSalts,
@@ -156,6 +171,27 @@ export async function buildGroth16ThresholdProof(input: BuildGroth16ThresholdPro
       verification_key: verificationKey
     }
   };
+}
+
+function requiredProductionCircuitInputs(claim: ZkThresholdProofV1["claim"]): string[] {
+  switch (claim) {
+    case "identity_age_days":
+      return ["subject_hash", "creation_epoch_day", "current_epoch_day", "threshold_days", "public_registry_root", "registry_leaf", "registry_salt", "registry_siblings", "registry_path_bits"];
+    case "reciprocal_receipt_count":
+      return ["subject_hash", "threshold_count", "public_receipt_root", "receipt_leaves", "receipt_salts", "counterparty_commitments", "receipt_siblings", "receipt_path_bits", "receipt_valid"];
+    case "dispute_rate_bound":
+      return ["subject_hash", "max_dispute_rate_bps", "public_receipt_root", "completed_leaves", "disputed_leaves", "completed_siblings", "completed_path_bits", "disputed_siblings", "disputed_path_bits", "completed_valid", "disputed_valid"];
+    case "set_membership":
+      return ["subject_hash", "set_id", "public_set_root", "membership_leaf", "membership_salt", "membership_siblings", "membership_path_bits"];
+    case "revocation_set_non_membership":
+      return ["subject_hash", "key_hash", "revocation_pointer_hash", "value_commitment", "public_revocation_root", "sparse_leaf_index", "empty_leaf_commitment", "sibling_path", "path_bits"];
+    case "organization_membership":
+      return ["subject_hash", "org_hash", "issuer_hash", "current_epoch_day", "public_attestation_root", "issuer_registry_root", "attestation_leaf", "attestation_siblings", "attestation_path_bits", "issuer_leaf", "issuer_siblings", "issuer_path_bits", "not_expired_epoch_day"];
+    case "agent_scope_compliance":
+      return ["subject_hash", "agent_hash", "principal_hash", "action_hash", "parameter_values_hash", "policy_constraints_hash", "scope_commitment", "delegation_chain_root", "delegation_siblings", "delegation_path_bits", "human_approval_required", "human_approval_present"];
+    case "private_graph_distance":
+      return ["subject_hash", "threshold_distance_bps", "committed_local_neighborhood_root", "trusted_seed_commitment", "adversarial_seed_commitment", "aggregate_proof_commitment", "local_edge_weights_bps", "trusted_seed_scores_bps", "adversarial_seed_scores_bps", "local_edge_valid"];
+  }
 }
 
 function publicSignalsToStrings(publicSignals: Array<string | number | bigint>): string[] {
@@ -235,6 +271,7 @@ export function zkProofUsesRegisteredCircuit(input: {
   if (!manifest || manifest.status !== "active") return false;
   if (isDevCircuitId(manifest.circuit_id) || isDevCircuitId(input.proof.circuit_id)) return false;
   if (!manifest.signature || !input.registry?.signature) return false;
+  if (!manifest.hash_suite || !manifest.witness_interface) return false;
   if (!manifest.public_signal_schema || !manifest.private_witness_schema || !manifest.soundness_bits || !manifest.privacy_notes?.length) return false;
   if (manifest.soundness_bits < 100 || !manifestDeclaresWitnessInterface(manifest)) return false;
   const manifestHash = zkCircuitReleaseManifestHash(manifest);

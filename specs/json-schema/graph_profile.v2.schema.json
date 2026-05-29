@@ -194,11 +194,41 @@
       "additionalProperties": false,
       "properties": {
         "algorithm": { "enum": ["seed_distance_proxy_v1", "centroid_covariance_v1"] },
+        "feature_ordering": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "ppr_distance_bps",
+              "trusted_seed_distance_proxy_bps",
+              "adversarial_seed_distance_proxy_bps",
+              "cluster_distance_proxy_bps"
+            ]
+          }
+        },
         "trusted_centroid_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
         "adversarial_centroid_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
         "cluster_centroid_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
         "covariance_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
-        "seed_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" }
+        "seed_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+        "trusted_centroid_bps": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        },
+        "adversarial_centroid_bps": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        },
+        "cluster_centroid_bps": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        },
+        "inverse_covariance_bps": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0, "maximum": 100000000 }
+          }
+        }
       }
     }
   }

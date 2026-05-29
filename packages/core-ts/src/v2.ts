@@ -37,6 +37,7 @@ import type {
   ScoringProfileV2,
 	  SybilAssessmentUnsignedV1,
 	  SybilAssessmentV1,
+	  SybilSimulationProfileV1,
 	  AttestationV1,
 	  AttestationV2,
 	  DisclosureConsentV1,
@@ -58,6 +59,7 @@ export const V2_DOMAIN_TAGS = {
   METADATA_FINGERPRINT_V1: "tsl.metadata_fingerprint_commitment.v1",
   GRAPH_FEATURE_VECTOR_V1: "tsl.graph_feature_vector.v1",
   SYBIL_ASSESSMENT_V1: "tsl.sybil_assessment.v1",
+  SYBIL_SIMULATION_PROFILE_V1: "tsl.sybil_simulation_profile.v1",
   DRIFT_REPORT_V1: "tsl.drift_report.v1",
   DELEGATION_POLICY_V2: "tsl.delegation_policy.v2",
   AGENT_ACTION_V2: "tsl.agent_action.v2"
@@ -93,6 +95,11 @@ function averageSignalBps(signal: object | undefined): number {
 function evidenceCountSignalBps(values: Array<number | undefined>, scale = 3): number {
   const count = values.reduce<number>((sum, value) => sum + Math.max(0, Math.trunc(value ?? 0)), 0);
   return clampBps(Math.floor((Math.min(scale, count) * 10000) / scale));
+}
+
+function sigmoidRiskBps(signalBps: number): number {
+  const centered = (clampBps(signalBps) - 5000) / 900;
+  return clampBps(Math.floor((1 / (1 + Math.exp(-centered))) * 10000));
 }
 
 export function scoringProfileV2Hash(profile: ScoringProfileUnsignedV2 | ScoringProfileV2): Hex32 {
@@ -161,6 +168,7 @@ export interface ReferenceScoreV0Input {
 	  };
 	  bootstrap_evidence_hashes?: Hex32[];
 	  feature_vector_commitment?: Hex32;
+  coverage_penalty_weight_bps?: number;
   has_adverse_evidence?: boolean;
   domain_policy: DomainPolicyV1;
   issued_at: RFC3339;
@@ -366,7 +374,8 @@ export function computeReferenceScoreV0(input: ReferenceScoreV0Input): TrustAsse
   for (const featureId of Object.keys(input.weights_bps).sort()) {
     score += Math.floor((clampBps(input.normalized_features_bps[featureId] ?? 0) * clampBps(input.weights_bps[featureId])) / 10000);
   }
-  const raw_score_bps = clampBps(score);
+  const coveragePenalty = Math.floor(((10000 - input.evidence_coverage.coverage_bps) * clampBps(input.coverage_penalty_weight_bps ?? 1000)) / 10000);
+  const raw_score_bps = clampBps(score - coveragePenalty);
   const calibrationPoints = [...(input.calibration_profile?.points ?? [])]
     .map((point) => ({ raw_bps: clampBps(point.raw_bps), calibrated_bps: clampBps(point.calibrated_bps) }))
     .sort((a, b) => a.raw_bps - b.raw_bps);
@@ -429,11 +438,16 @@ export function computeReferenceScoreV0(input: ReferenceScoreV0Input): TrustAsse
   const confidenceWidth = clampBps(Math.max(minWidth, Math.min(maxWidth, confidenceMethod === "deterministic_bootstrap_v1" ? bootstrapWidth() : analyticWidth())));
   const thresholds = input.domain_policy.thresholds;
   const lowerBound = Math.max(0, score_bps - confidenceWidth);
+  const lowCoverage = input.evidence_coverage.coverage_bps < 5000;
   const label =
     score_bps >= thresholds.trusted_bps && lowerBound >= 8000 && input.evidence_coverage.coverage_bps >= 7500
       ? "trusted"
       : score_bps >= thresholds.likely_trusted_bps && input.evidence_coverage.coverage_bps >= 5000
         ? "likely_trusted"
+        : lowCoverage && input.has_adverse_evidence !== true
+          ? input.evidence_coverage.coverage_bps < 2500 || input.evidence_coverage.coverage_bps < input.domain_policy.min_coverage_bps
+            ? "insufficient_evidence"
+            : "unknown_caution"
         : score_bps >= thresholds.medium_bps
           ? "medium_trust"
           : input.evidence_coverage.coverage_bps < input.domain_policy.min_coverage_bps || input.evidence_coverage.coverage_bps < 2500
@@ -796,7 +810,7 @@ function isReceiptGraphEdge(edge: GraphEdgeV0): boolean {
 function negativeEvidenceAllowed(edge: GraphEdgeV0, graphProfile: GraphProfileV2): boolean {
   if (!isNegativeGraphEdge(edge)) return true;
   if (graphProfile.negative_edge_policy.requires_evidence_commitment && !edge.evidence_commitment) return false;
-  if (graphProfile.negative_edge_policy.requires_appeal_uri && !edge.appeal_uri && !edge.appeal_status) return false;
+  if (graphProfile.negative_edge_policy.requires_appeal_uri && (!edge.appeal_uri || !edge.appeal_status)) return false;
   return true;
 }
 
@@ -806,8 +820,9 @@ function effectiveWeight(edge: GraphEdgeV0, graphProfile?: GraphProfileV2): numb
     if (multiplier !== undefined) value = Math.floor((value * clampBps(multiplier)) / 10000);
   }
   if (graphProfile && isNegativeGraphEdge(edge)) {
-    if (graphProfile.community_detection.negative_edge_treatment === "ignore") return 0;
-    value = Math.min(value, clampBps(graphProfile.negative_edge_policy.max_single_negative_weight_bps));
+    const treatment = graphProfile.community_detection.negative_edge_treatment ?? "cap";
+    if (treatment === "ignore") return 0;
+    if (treatment === "cap") value = Math.min(value, clampBps(graphProfile.negative_edge_policy.max_single_negative_weight_bps));
   }
   return Math.max(0, value);
 }
@@ -818,13 +833,43 @@ function signedEffectiveWeight(edge: GraphEdgeV0, graphProfile?: GraphProfileV2)
   return isNegativeGraphEdge(edge) ? -weight : weight;
 }
 
-function connectedComponents(graph: GraphV0, edgeFloorBps = 1000): Map<TrustID, number> {
+function graphMetricWeight(edge: GraphEdgeV0, graphProfile?: GraphProfileV2, signedSupported = false): number {
+  const signed = signedEffectiveWeight(edge, graphProfile);
+  if (signedSupported) return signed;
+  return Math.max(0, signed);
+}
+
+function projectedGraphArcs(
+  graph: GraphV0,
+  graphProfile?: GraphProfileV2,
+  options: { signed_supported?: boolean } = {}
+): Array<{ src: TrustID; dst: TrustID; weight: number; edge: GraphEdgeV0 }> {
+  const projection = graphProfile?.community_detection.projection ?? "undirected_sum";
+  const arcs: Array<{ src: TrustID; dst: TrustID; weight: number; edge: GraphEdgeV0 }> = [];
+  for (const edge of graph.edges) {
+    const weight = graphMetricWeight(edge, graphProfile, options.signed_supported);
+    if (weight === 0) continue;
+    arcs.push({ src: edge.src, dst: edge.dst, weight, edge });
+    if (projection !== "directed_outbound" && edge.src !== edge.dst) arcs.push({ src: edge.dst, dst: edge.src, weight, edge });
+  }
+  return arcs;
+}
+
+function projectedNodeMasses(graph: GraphV0, node: TrustID, graphProfile?: GraphProfileV2): Map<TrustID, number> {
+  const masses = new Map<TrustID, number>();
+  for (const arc of projectedGraphArcs(graph, graphProfile)) {
+    if (arc.src !== node) continue;
+    masses.set(arc.dst, (masses.get(arc.dst) ?? 0) + arc.weight);
+  }
+  return masses;
+}
+
+function connectedComponents(graph: GraphV0, edgeFloorBps = 1000, graphProfile?: GraphProfileV2): Map<TrustID, number> {
   const adjacency = new Map<TrustID, Set<TrustID>>();
   for (const node of graph.nodes) adjacency.set(node, new Set());
-  for (const edge of graph.edges) {
-    if (Math.abs(signedEffectiveWeight(edge)) < edgeFloorBps) continue;
-    adjacency.get(edge.src)?.add(edge.dst);
-    adjacency.get(edge.dst)?.add(edge.src);
+  for (const arc of projectedGraphArcs(graph, graphProfile)) {
+    if (Math.abs(arc.weight) < edgeFloorBps) continue;
+    adjacency.get(arc.src)?.add(arc.dst);
   }
   const components = new Map<TrustID, number>();
   let componentId = 0;
@@ -896,7 +941,7 @@ function deterministicLeidenRefinement(graph: GraphV0, graphProfile: GraphProfil
   }
   for (const [, nodes] of [...coarseGroups.entries()].sort((a, b) => Math.min(...a[1].map((n) => graph.nodes.indexOf(n))) - Math.min(...b[1].map((n) => graph.nodes.indexOf(n))))) {
     const subgraphEdges = graph.edges.filter((edge) => nodes.includes(edge.src) && nodes.includes(edge.dst) && Math.max(0, signedEffectiveWeight(edge, graphProfile)) >= floor);
-    const subComponents = connectedComponents({ nodes: [...nodes].sort(), edges: subgraphEdges }, floor);
+    const subComponents = connectedComponents({ nodes: [...nodes].sort(), edges: subgraphEdges }, floor, graphProfile);
     const localIds = [...new Set(subComponents.values())].sort((a, b) => a - b);
     for (const local of localIds) {
       for (const [node, component] of subComponents.entries()) {
@@ -1050,7 +1095,7 @@ function deterministicLeidenRefinementV1(graph: GraphV0, graphProfile: GraphProf
       if (!nodes.includes(edge.src) || !nodes.includes(edge.dst)) return false;
       return Math.max(0, signedEffectiveWeight(edge, graphProfile)) >= refinementThreshold;
     });
-    const subComponents = connectedComponents({ nodes: [...nodes].sort(), edges: subgraphEdges }, refinementThreshold);
+    const subComponents = connectedComponents({ nodes: [...nodes].sort(), edges: subgraphEdges }, refinementThreshold, graphProfile);
     const ids = [...new Set(subComponents.values())].sort((a, b) => a - b);
     for (const id of ids) {
       for (const [node, component] of subComponents.entries()) {
@@ -1093,7 +1138,7 @@ function communityAssignments(graph: GraphV0, graphProfile?: GraphProfileV2): Ma
   const floor = graphProfile.community_detection.edge_weight_floor_bps ?? 1000;
   const assignments =
     algorithm === "connected_components" || algorithm === "connected_components_v0"
-      ? connectedComponents(graph, floor)
+      ? connectedComponents(graph, floor, graphProfile)
       : algorithm === "louvain_modularity_v0"
         ? deterministicWeightedLabelPropagation(graph, graphProfile)
         : algorithm === "leiden_refinement_v0"
@@ -1102,7 +1147,7 @@ function communityAssignments(graph: GraphV0, graphProfile?: GraphProfileV2): Ma
             ? deterministicLouvainModularityV1(graph, graphProfile).assignments
             : algorithm === "leiden_refinement_v1"
               ? deterministicLeidenRefinementV1(graph, graphProfile).assignments
-              : connectedComponents(graph, floor);
+              : connectedComponents(graph, floor, graphProfile);
   return applyMinClusterSize(graph, graphProfile, assignments);
 }
 
@@ -1118,15 +1163,14 @@ function shortestSeedDistance(graph: GraphV0, subject: TrustID, seeds: Set<Trust
   const queue: Array<{ node: TrustID; distance: number }> = [{ node: subject, distance: 0 }];
   const seen = new Set<TrustID>([subject]);
   const floor = graphProfile?.community_detection.edge_weight_floor_bps ?? 1000;
+  const arcs = projectedGraphArcs(graph, graphProfile, { signed_supported: true });
   while (queue.length) {
     const current = queue.shift()!;
-    for (const edge of graph.edges) {
-      if (Math.abs(signedEffectiveWeight(edge, graphProfile)) < floor) continue;
-      const next = edge.src === current.node ? edge.dst : edge.dst === current.node ? edge.src : null;
-      if (!next || seen.has(next)) continue;
-      if (seeds.has(next)) return current.distance + 1;
-      seen.add(next);
-      queue.push({ node: next, distance: current.distance + 1 });
+    for (const arc of arcs) {
+      if (arc.src !== current.node || Math.abs(arc.weight) < floor || seen.has(arc.dst)) continue;
+      if (seeds.has(arc.dst)) return current.distance + 1;
+      seen.add(arc.dst);
+      queue.push({ node: arc.dst, distance: current.distance + 1 });
     }
   }
   return Number.POSITIVE_INFINITY;
@@ -1135,6 +1179,20 @@ function shortestSeedDistance(graph: GraphV0, subject: TrustID, seeds: Set<Trust
 function distanceScoreBps(distance: number): number {
   if (!Number.isFinite(distance)) return 0;
   return clampBps(Math.floor(10000 / (1 + distance)));
+}
+
+function centroidCovarianceDistanceBps(features: number[], centroid?: number[], inverseCovariance?: number[][]): number | undefined {
+  if (!centroid || !inverseCovariance || centroid.length !== features.length || inverseCovariance.length !== features.length) return undefined;
+  let quadratic = 0;
+  for (let row = 0; row < features.length; row += 1) {
+    if (!inverseCovariance[row] || inverseCovariance[row].length !== features.length) return undefined;
+    const rowDelta = features[row] - clampBps(centroid[row]);
+    for (let column = 0; column < features.length; column += 1) {
+      const columnDelta = features[column] - clampBps(centroid[column]);
+      quadratic += Math.floor((rowDelta * clampBps(inverseCovariance[row][column]) * columnDelta) / 100000000);
+    }
+  }
+  return clampBps(fixedPointSqrt(Math.max(0, quadratic)));
 }
 
 function pageRankScores(graph: GraphV0, graphProfile?: GraphProfileV2, trustedSeeds: TrustID[] = [], subject?: TrustID): Map<TrustID, number> {
@@ -1149,17 +1207,18 @@ function pageRankScores(graph: GraphV0, graphProfile?: GraphProfileV2, trustedSe
     personalization === "trusted_seeds" && trusted.size ? nodes.filter((node) => trusted.has(node)) : personalization === "subject" && subject ? [subject] : nodes;
   for (const node of nodes) personalize.set(node, personalizedNodes.includes(node) ? 1 / personalizedNodes.length : 0);
   let scores = new Map<TrustID, number>(nodes.map((node) => [node, 1 / nodes.length]));
+  const arcs = projectedGraphArcs(graph, graphProfile);
   for (let i = 0; i < iterations; i += 1) {
     const next = new Map<TrustID, number>(nodes.map((node) => [node, (1 - damping) * (personalize.get(node) ?? 0)]));
     for (const src of nodes) {
-      const outgoing = graph.edges.filter((edge) => edge.src === src).map((edge) => [edge, Math.max(0, signedEffectiveWeight(edge, graphProfile))] as const);
-      const total = outgoing.reduce((sum, [, weight]) => sum + weight, 0);
+      const outgoing = arcs.filter((edge) => edge.src === src && edge.weight > 0);
+      const total = outgoing.reduce((sum, edge) => sum + edge.weight, 0);
       if (total <= 0) {
         for (const node of nodes) next.set(node, (next.get(node) ?? 0) + damping * (scores.get(src) ?? 0) * (personalize.get(node) ?? 0));
         continue;
       }
-      for (const [edge, weight] of outgoing) {
-        next.set(edge.dst, (next.get(edge.dst) ?? 0) + damping * (scores.get(src) ?? 0) * (weight / total));
+      for (const edge of outgoing) {
+        next.set(edge.dst, (next.get(edge.dst) ?? 0) + damping * (scores.get(src) ?? 0) * (edge.weight / total));
       }
     }
     scores = next;
@@ -1178,6 +1237,9 @@ export function computeGraphFeatureVectorV0(input: {
 	  computed_at?: RFC3339;
 	  signature?: HexSig;
 	}): GraphFeatureVectorV1 {
+	  const projection = input.graph_profile?.community_detection.projection ?? "undirected_sum";
+	  const projectedArcs = projectedGraphArcs(input.graph, input.graph_profile);
+	  const subjectMasses = projectedNodeMasses(input.graph, input.subject, input.graph_profile);
 	  const incident = input.graph.edges.filter((edge) => edge.src === input.subject || edge.dst === input.subject);
 	  const outbound = new Map<TrustID, number>();
 	  const inbound = new Map<TrustID, number>();
@@ -1187,8 +1249,8 @@ export function computeGraphFeatureVectorV0(input: {
 	    if (edge.src === input.subject) outbound.set(edge.dst, (outbound.get(edge.dst) ?? 0) + weight);
 	    if (edge.dst === input.subject) inbound.set(edge.src, (inbound.get(edge.src) ?? 0) + weight);
 	  }
-	  const counterpartySet = new Set([...outbound.keys(), ...inbound.keys()]);
-	  const pairMasses = [...counterpartySet].map((counterparty) => (outbound.get(counterparty) ?? 0) + (inbound.get(counterparty) ?? 0));
+	  const counterpartySet = new Set([...subjectMasses.keys()]);
+	  const pairMasses = [...counterpartySet].map((counterparty) => subjectMasses.get(counterparty) ?? 0);
 	  const totalMass = pairMasses.reduce((sum, weight) => sum + weight, 0);
 	  const hhi = totalMass === 0 ? 0 : clampBps(Math.floor(pairMasses.reduce((sum, mass) => sum + (mass / totalMass) ** 2, 0) * 10000));
 	  const entropy =
@@ -1208,39 +1270,32 @@ export function computeGraphFeatureVectorV0(input: {
 	  const reciprocalDenominator = [...counterpartySet].reduce((sum, counterparty) => sum + (outbound.get(counterparty) ?? 0) + (inbound.get(counterparty) ?? 0), 0);
 	  const seedSet = new Set(input.trusted_seeds ?? []);
 	  const adversarialSeedSet = new Set(input.adversarial_seeds ?? []);
-	  const seedMass = incident.reduce((sum, edge) => sum + (edge.src === input.subject && seedSet.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
-	  const trustedNeighborMass = incident.reduce((sum, edge) => {
-	    const neighbor = edge.src === input.subject ? edge.dst : edge.dst === input.subject ? edge.src : undefined;
-	    const modelScore = neighbor ? clampBps(input.trusted_neighbor_scores_bps?.[neighbor] ?? (seedSet.has(neighbor) ? 10000 : 0)) : 0;
-	    return sum + Math.floor((Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) * modelScore) / 10000);
+	  const seedMass = [...subjectMasses.entries()].reduce((sum, [neighbor, mass]) => sum + (seedSet.has(neighbor) ? mass : 0), 0);
+	  const trustedNeighborMass = [...subjectMasses.entries()].reduce((sum, [neighbor, mass]) => {
+	    const modelScore = clampBps(input.trusted_neighbor_scores_bps?.[neighbor] ?? (seedSet.has(neighbor) ? 10000 : 0));
+	    return sum + Math.floor((mass * modelScore) / 10000);
 	  }, 0);
-	  const adversarialMass = incident.reduce((sum, edge) => sum + (adversarialSeedSet.has(edge.src) || adversarialSeedSet.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
+	  const adversarialMass = [...subjectMasses.entries()].reduce((sum, [neighbor, mass]) => sum + (adversarialSeedSet.has(neighbor) ? mass : 0), 0);
 	  const communitiesResult = communityResult(input.graph, input.graph_profile);
 	  const communities = communitiesResult.assignments;
 		  const subjectCommunityId = communities.get(input.subject);
 		  const community = componentOfSubject(input.graph, input.subject, input.graph_profile);
 		  const communityTouching = input.graph.edges.filter((edge) => community.has(edge.src) || community.has(edge.dst));
-		  const subjectInternalMass = [...counterpartySet].reduce((sum, counterparty) => {
+		  const subjectInternalMass = [...subjectMasses.entries()].reduce((sum, [counterparty, mass]) => {
 		    if (communities.get(counterparty) !== subjectCommunityId) return sum;
-		    return sum + (outbound.get(counterparty) ?? 0) + (inbound.get(counterparty) ?? 0);
+		    return sum + mass;
 		  }, 0);
-		  const subjectExternalMass = [...counterpartySet].reduce((sum, counterparty) => {
+		  const subjectExternalMass = [...subjectMasses.entries()].reduce((sum, [counterparty, mass]) => {
 		    if (communities.get(counterparty) === subjectCommunityId) return sum;
-		    return sum + (outbound.get(counterparty) ?? 0) + (inbound.get(counterparty) ?? 0);
+		    return sum + mass;
 		  }, 0);
-			  const communityCutMass = input.graph.edges.reduce(
-			    (sum, edge) => sum + (community.has(edge.src) !== community.has(edge.dst) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0),
-			    0
-			  );
-			  const communityVolume = input.graph.edges.reduce((sum, edge) => sum + (community.has(edge.src) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
-			  const complementVolume = input.graph.edges.reduce((sum, edge) => sum + (!community.has(edge.src) ? Math.max(0, signedEffectiveWeight(edge, input.graph_profile)) : 0), 0);
+			  const communityCutMass = projectedArcs.reduce((sum, arc) => sum + (community.has(arc.src) && !community.has(arc.dst) ? arc.weight : 0), 0);
+			  const communityVolume = projectedArcs.reduce((sum, arc) => sum + (community.has(arc.src) ? arc.weight : 0), 0);
+			  const complementVolume = projectedArcs.reduce((sum, arc) => sum + (!community.has(arc.src) ? arc.weight : 0), 0);
 	  const communityMasses = new Map<number, number>();
-	  for (const edge of input.graph.edges) {
-	    const srcCommunity = communities.get(edge.src);
-	    const dstCommunity = communities.get(edge.dst);
-	    const mass = Math.max(0, signedEffectiveWeight(edge, input.graph_profile));
-	    if (srcCommunity !== undefined) communityMasses.set(srcCommunity, (communityMasses.get(srcCommunity) ?? 0) + mass);
-	    if (dstCommunity !== undefined && dstCommunity !== srcCommunity) communityMasses.set(dstCommunity, (communityMasses.get(dstCommunity) ?? 0) + mass);
+	  for (const arc of projectedArcs) {
+	    const srcCommunity = communities.get(arc.src);
+	    if (srcCommunity !== undefined) communityMasses.set(srcCommunity, (communityMasses.get(srcCommunity) ?? 0) + arc.weight);
 	  }
 	  const totalCommunityMass = [...communityMasses.values()].reduce((sum, mass) => sum + mass, 0);
 	  const communityHhi = totalCommunityMass === 0 ? 10000 : Math.floor([...communityMasses.values()].reduce((sum, mass) => sum + (mass / totalCommunityMass) ** 2, 0) * 10000);
@@ -1266,9 +1321,33 @@ export function computeGraphFeatureVectorV0(input: {
 		  };
 			  const pprLite = pageRankScores(input.graph, pprProfile, input.trusted_seeds, input.subject).get(input.subject) ?? 0;
 			  const pprDistance = clampBps(10000 - pprLite);
-			  const trustedManifoldDistance = clampBps(10000 - distanceScoreBps(trustedDistance));
-			  const adversarialManifoldDistance = clampBps(10000 - distanceScoreBps(adversarialDistance));
-			  const clusterDistance = clampBps(10000 - bps(subjectInternalMass, subjectInternalMass + subjectExternalMass));
+			  const proxyTrustedManifoldDistance = clampBps(10000 - distanceScoreBps(trustedDistance));
+			  const proxyAdversarialManifoldDistance = clampBps(10000 - distanceScoreBps(adversarialDistance));
+			  const proxyClusterDistance = clampBps(10000 - bps(subjectInternalMass, subjectInternalMass + subjectExternalMass));
+			  const manifoldFeatures = [pprDistance, proxyTrustedManifoldDistance, proxyAdversarialManifoldDistance, proxyClusterDistance];
+			  const manifoldProfile = input.graph_profile?.manifold_profile;
+			  let trustedManifoldDistance = proxyTrustedManifoldDistance;
+			  let adversarialManifoldDistance = proxyAdversarialManifoldDistance;
+			  let clusterDistance = proxyClusterDistance;
+			  if (manifoldProfile?.algorithm === "centroid_covariance_v1") {
+			    if (
+			      manifoldProfile.trusted_centroid_commitment !== sha256Hex(canonicalBytes(manifoldProfile.trusted_centroid_bps ?? [])) ||
+			      manifoldProfile.adversarial_centroid_commitment !== sha256Hex(canonicalBytes(manifoldProfile.adversarial_centroid_bps ?? [])) ||
+			      manifoldProfile.cluster_centroid_commitment !== sha256Hex(canonicalBytes(manifoldProfile.cluster_centroid_bps ?? [])) ||
+			      manifoldProfile.covariance_commitment !== sha256Hex(canonicalBytes(manifoldProfile.inverse_covariance_bps ?? []))
+			    ) {
+			      throw new Error("TSL_MANIFOLD_PROFILE_UNSUPPORTED");
+			    }
+			    const trustedDistanceBps = centroidCovarianceDistanceBps(manifoldFeatures, manifoldProfile.trusted_centroid_bps, manifoldProfile.inverse_covariance_bps);
+			    const adversarialDistanceBps = centroidCovarianceDistanceBps(manifoldFeatures, manifoldProfile.adversarial_centroid_bps, manifoldProfile.inverse_covariance_bps);
+			    const clusterDistanceBps = centroidCovarianceDistanceBps(manifoldFeatures, manifoldProfile.cluster_centroid_bps, manifoldProfile.inverse_covariance_bps);
+			    if (trustedDistanceBps === undefined || adversarialDistanceBps === undefined || clusterDistanceBps === undefined) {
+			      throw new Error("TSL_MANIFOLD_PROFILE_UNSUPPORTED");
+			    }
+			    trustedManifoldDistance = trustedDistanceBps;
+			    adversarialManifoldDistance = adversarialDistanceBps;
+			    clusterDistance = clusterDistanceBps;
+			  }
 	  const unsignedVectorBasis = {
 	    subject: input.subject,
 	    graph_profile_id: input.graph_profile_id,
@@ -1298,6 +1377,9 @@ export function computeGraphFeatureVectorV0(input: {
 		    pagerank_bps: pagerank.get(input.subject) ?? 0,
 		    ppr_lite_bps: pprLite,
 		    ppr_distance_bps: pprDistance,
+		    trusted_seed_distance_proxy_bps: proxyTrustedManifoldDistance,
+		    adversarial_seed_distance_proxy_bps: proxyAdversarialManifoldDistance,
+		    cluster_distance_proxy_bps: proxyClusterDistance,
 		    trusted_manifold_distance_bps: trustedManifoldDistance,
 		    adversarial_manifold_distance_bps: adversarialManifoldDistance,
 		    cluster_distance_bps: clusterDistance,
@@ -1510,7 +1592,7 @@ export function computeSybilAssessmentV0(input: {
 	        : tier === "B5"
 	          ? Math.floor(infrastructureCollusionSignal * 0.45)
 	          : 0;
-	  const risk_score_bps = clampBps(
+	  const linearSignalBps = clampBps(
 	    Math.floor(
 	      (concentration * 20 +
 	        internalReceiptRatio * 12 +
@@ -1523,6 +1605,7 @@ export function computeSybilAssessmentV0(input: {
 	        100
 	    ) + tierConfig.risk_adjustment_bps + behavioralRiskAdjustment
 	  );
+	  const risk_score_bps = sigmoidRiskBps(linearSignalBps);
   const minEvidenceMass = input.sybil_profile?.min_evidence_mass ?? tierConfig.min_evidence_mass;
 	  const costComponents = {
 	    identity_cost_minor_units: Math.floor((cluster.size * (input.sybil_profile?.base_identity_cost_minor_units ?? 25000) * tierConfig.cost_multiplier_bps) / 10000),
@@ -1613,6 +1696,53 @@ export function sybilAssessmentV1Hash(assessment: SybilAssessmentUnsignedV1 | Sy
 
 export function signSybilAssessmentV1(assessment: SybilAssessmentUnsignedV1, seedHex: string): SybilAssessmentV1 {
   return { ...assessment, signature: signEd25519(sybilAssessmentV1Hash(assessment), seedHex) };
+}
+
+export function sybilSimulationProfileV1Hash(profile: SybilSimulationProfileV1): Hex32 {
+  return hashSignedObject(V2_DOMAIN_TAGS.SYBIL_SIMULATION_PROFILE_V1, profile as unknown as Record<string, unknown>);
+}
+
+export function runSybilSimulationProfileV1(input: {
+  profile: SybilSimulationProfileV1;
+  graph: GraphV0;
+  graph_profile: GraphProfileV2;
+  trusted_seeds?: TrustID[];
+  adversarial_seeds?: TrustID[];
+  computed_at?: RFC3339;
+}): SybilAssessmentV1[] {
+  if (input.profile.graph_profile_id !== input.graph_profile.profile_id) {
+    throw new Error("TSL_GRAPH_ARTIFACTS_INVALID");
+  }
+  return input.profile.scenarios.map((scenario) => {
+    if (scenario.adversary_tier === "B3" && !scenario.compromise_evidence) throw new Error("TSL_SYBIL_EVIDENCE_INCOMPLETE");
+    if (scenario.adversary_tier === "B4" && !scenario.issuer_collusion_evidence) throw new Error("TSL_SYBIL_EVIDENCE_INCOMPLETE");
+    if (scenario.adversary_tier === "B5" && !scenario.infrastructure_collusion_evidence) throw new Error("TSL_SYBIL_EVIDENCE_INCOMPLETE");
+    return computeSybilAssessmentV0({
+      subject: scenario.subject,
+      issuer: input.profile.issuer,
+      graph: input.graph,
+      graph_profile: input.graph_profile,
+      trusted_seeds: input.trusted_seeds,
+      adversarial_seeds: input.adversarial_seeds,
+      evidence_commitment: scenario.evidence_commitment,
+      computed_at: input.computed_at ?? input.profile.issued_at,
+      sybil_profile: {
+        profile_id: `${input.profile.profile_id}:${scenario.scenario_id}`,
+        adversary_tier: scenario.adversary_tier,
+        expected_benefit_minor_units: scenario.expected_benefit_minor_units,
+        attack_scenario: scenario.attack_scenario,
+        base_identity_cost_minor_units: scenario.cost_overrides?.identity_cost_minor_units,
+        time_aging_cost_minor_units: scenario.cost_overrides?.time_aging_cost_minor_units,
+        external_receipt_cost_minor_units: scenario.cost_overrides?.external_receipt_cost_minor_units,
+        attestation_cost_minor_units: scenario.cost_overrides?.attestation_cost_minor_units,
+        compromise_cost_minor_units: scenario.cost_overrides?.compromise_cost_minor_units,
+        evasion_cost_minor_units: scenario.cost_overrides?.evasion_cost_minor_units,
+        compromise_evidence: scenario.compromise_evidence,
+        issuer_collusion_evidence: scenario.issuer_collusion_evidence,
+        infrastructure_collusion_evidence: scenario.infrastructure_collusion_evidence
+      }
+    });
+  });
 }
 
 function fixedPointSqrt(value: number): number {

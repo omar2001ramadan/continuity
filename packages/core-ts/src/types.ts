@@ -173,14 +173,29 @@ export interface SettlementEvidenceV1 {
   contract_checkpoint_hash?: Hex32;
   contract_checkpoint_fields_hash: Hex32;
   settlement_tx: string;
+  evidence_kind: "offline_receipt_log_proof" | "rpc_attested_receipt";
+  block_header_rlp?: string;
+  receipt_rlp?: string;
+  receipt_proof_nodes?: string[];
+  finality_proof?: {
+    type: "finalized_block" | "confirmations" | "checkpoint_oracle";
+    finalized_block_hash?: Hex32;
+    confirmations?: number;
+    source_commitment: Hex32;
+  };
   transaction_receipt_hash?: Hex32;
   block_hash?: Hex32;
   block_number?: number;
+  receipt_root?: Hex32;
+  transaction_index?: number;
   receipt_status?: "success" | "reverted" | "unknown";
   chain_proof_commitment?: Hex32;
   settlement_event_hash?: Hex32;
   settlement_event_index?: number;
+  event_topic_hash?: Hex32;
+  log_index?: number;
   receipt_proof_source_commitment?: Hex32;
+  finality_source_commitment?: Hex32;
   submitter: string;
   submitted_at: RFC3339;
   status: "submitted" | "settled" | "failed";
@@ -324,6 +339,7 @@ export interface TrustAssessmentV2 {
     | "delegation_missing";
   reason_codes: string[];
   risk_codes: string[];
+  evidence_commitment?: Hex32;
   feature_vector_commitment?: Hex32;
   evidence_coverage_commitment?: Hex32;
   privacy_disclosure_level?: "none" | "aggregate_only" | "pairwise" | "selective" | "public";
@@ -416,11 +432,21 @@ export interface GraphProfileV2 {
   };
   manifold_profile?: {
     algorithm: "seed_distance_proxy_v1" | "centroid_covariance_v1";
+    feature_ordering?: Array<
+      | "ppr_distance_bps"
+      | "trusted_seed_distance_proxy_bps"
+      | "adversarial_seed_distance_proxy_bps"
+      | "cluster_distance_proxy_bps"
+    >;
     trusted_centroid_commitment?: Hex32;
     adversarial_centroid_commitment?: Hex32;
     cluster_centroid_commitment?: Hex32;
     covariance_commitment?: Hex32;
     seed_commitment?: Hex32;
+    trusted_centroid_bps?: number[];
+    adversarial_centroid_bps?: number[];
+    cluster_centroid_bps?: number[];
+    inverse_covariance_bps?: number[][];
   };
 }
 
@@ -460,6 +486,9 @@ export interface GraphFeatureVectorV1 {
   pagerank_bps?: number;
   ppr_lite_bps?: number;
   ppr_distance_bps?: number;
+  trusted_seed_distance_proxy_bps?: number;
+  adversarial_seed_distance_proxy_bps?: number;
+  cluster_distance_proxy_bps?: number;
   trusted_manifold_distance_bps?: number;
   adversarial_manifold_distance_bps?: number;
   cluster_distance_bps?: number;
@@ -521,6 +550,37 @@ export interface SybilAssessmentV1 {
 }
 
 export type SybilAssessmentUnsignedV1 = Omit<SybilAssessmentV1, "signature">;
+
+export interface SybilSimulationProfileV1 {
+  type: "tsl.sybil_simulation_profile.v1";
+  profile_id: string;
+  issuer: TrustID;
+  graph_profile_id: string;
+  scenarios: Array<{
+    scenario_id: string;
+    adversary_tier: SybilAssessmentV1["adversary_tier_assumed"];
+    subject: TrustID;
+    attack_scenario:
+      | "dense_farm"
+      | "slow_aged_farm"
+      | "bridge_attack"
+      | "receipt_farm"
+      | "purchased_aged_identity"
+      | "compromised_identity"
+      | "issuer_collusion"
+      | "infrastructure_collusion"
+      | "low_evidence_identity"
+      | string;
+    expected_benefit_minor_units: number;
+    evidence_commitment: Hex32;
+    cost_overrides?: Partial<SybilAssessmentV1["cost_components"]>;
+    compromise_evidence?: SybilAssessmentV1["compromise_evidence"];
+    issuer_collusion_evidence?: SybilAssessmentV1["issuer_collusion_evidence"];
+    infrastructure_collusion_evidence?: SybilAssessmentV1["infrastructure_collusion_evidence"];
+  }>;
+  issued_at: RFC3339;
+  signature?: HexSig;
+}
 
 export interface SybilCompromiseSignalsV1 {
   key_revocation_bps?: number;
@@ -694,8 +754,8 @@ export interface ZkCircuitReleaseManifestV1 {
   circuit_id: string;
   claim: ZkThresholdProofV1["claim"];
 	  version: string;
-	  hash_suite?: string;
-	  witness_interface?: string;
+	  hash_suite: string;
+	  witness_interface: string;
 	  circuit_hash: Hex32;
   r1cs_hash: Hex32;
   wasm_hash: Hex32;
@@ -764,6 +824,8 @@ export interface NormalizationProfileV1 {
   type: "tsl.normalization_profile.v1";
   profile_id: string;
   feature_ranges_bps: Record<string, { min_bps: number; max_bps: number; missing_bps: number }>;
+  feature_methods?: Record<string, "bounded" | "log_percentile" | "asinh" | "risk_penalty">;
+  asinh_scales_bps?: Record<string, number>;
   training_window?: { start: RFC3339; end: RFC3339 };
   percentiles_bps?: Record<string, { p05_bps: number; p50_bps: number; p95_bps: number }>;
   missing_value_policy?: "impute_zero_with_coverage_penalty" | "impute_median_with_uncertainty" | "reject";

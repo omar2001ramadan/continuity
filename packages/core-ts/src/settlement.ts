@@ -49,7 +49,12 @@ function settlementEventHashForEvidence(evidence: Pick<
   | "transaction_receipt_hash"
   | "block_hash"
   | "block_number"
+  | "receipt_root"
+  | "transaction_index"
   | "receipt_status"
+  | "settlement_event_index"
+  | "event_topic_hash"
+  | "log_index"
   | "submitter"
 >): Hex32 {
   return sha256Hex(
@@ -62,7 +67,12 @@ function settlementEventHashForEvidence(evidence: Pick<
       transaction_receipt_hash: evidence.transaction_receipt_hash,
       block_hash: evidence.block_hash,
       block_number: evidence.block_number,
+      receipt_root: evidence.receipt_root,
+      transaction_index: evidence.transaction_index,
       receipt_status: evidence.receipt_status,
+      settlement_event_index: evidence.settlement_event_index,
+      event_topic_hash: evidence.event_topic_hash,
+      log_index: evidence.log_index,
       submitter: evidence.submitter.toLowerCase()
     })
   );
@@ -204,6 +214,7 @@ export class LocalEvmSettlementBackend implements SettlementBackend {
 
       const receipt = checkpoint.settlement_tx ? await this.provider.getTransactionReceipt(checkpoint.settlement_tx) : null;
       const receiptStatus = receipt?.status === 1 ? "success" : receipt?.status === 0 ? "reverted" : "unknown";
+      const checkpointLog = receipt?.logs.find((log) => log.address.toLowerCase() === this.registryAddress.toLowerCase() && log.topics[0] === ethers.id("CheckpointSubmitted(bytes32,bytes32,uint64,bytes32,bytes32,address)"));
       const settlementEvidenceBase = checkpoint.settlement_tx && receipt
         ? {
             type: "tsl.settlement_evidence.v1" as const,
@@ -215,10 +226,16 @@ export class LocalEvmSettlementBackend implements SettlementBackend {
             contract_checkpoint_hash: fieldsHash,
             contract_checkpoint_fields_hash: fieldsHash,
             settlement_tx: receipt.hash,
+            evidence_kind: "rpc_attested_receipt" as const,
             transaction_receipt_hash: receipt.hash as Hex32,
             block_hash: receipt.blockHash as Hex32,
             block_number: receipt.blockNumber,
+            receipt_root: sha256Hex(canonicalBytes({ block_hash: receipt.blockHash, logs_bloom: receipt.logsBloom, transaction_receipt_hash: receipt.hash })),
+            transaction_index: receipt.index,
             receipt_status: receiptStatus as "success" | "reverted" | "unknown",
+            settlement_event_index: checkpointLog?.transactionIndex ?? 0,
+            event_topic_hash: (checkpointLog?.topics[0] ?? ethers.id("CheckpointSubmitted(bytes32,bytes32,uint64,bytes32,bytes32,address)")) as Hex32,
+            log_index: checkpointLog?.index ?? 0,
             submitter: stored.submitter ?? receipt.from ?? ethers.ZeroAddress,
             submitted_at: new Date(Number(stored.submittedAt) * 1000).toISOString(),
             status: receiptStatus === "success" ? ("settled" as const) : ("failed" as const)
@@ -226,20 +243,38 @@ export class LocalEvmSettlementBackend implements SettlementBackend {
         : undefined;
       const settlementEventHash = settlementEvidenceBase ? settlementEventHashForEvidence(settlementEvidenceBase) : undefined;
       const receiptProofSourceCommitment = settlementEvidenceBase
-        ? sha256Hex(canonicalBytes({ block_hash: settlementEvidenceBase.block_hash, block_number: settlementEvidenceBase.block_number, transaction_receipt_hash: settlementEvidenceBase.transaction_receipt_hash }))
+        ? sha256Hex(
+            canonicalBytes({
+              block_hash: settlementEvidenceBase.block_hash,
+              block_number: settlementEvidenceBase.block_number,
+              receipt_root: settlementEvidenceBase.receipt_root,
+              transaction_receipt_hash: settlementEvidenceBase.transaction_receipt_hash,
+              transaction_index: settlementEvidenceBase.transaction_index,
+              log_index: settlementEvidenceBase.log_index
+            })
+          )
+        : undefined;
+      const finalitySourceCommitment = settlementEvidenceBase
+        ? sha256Hex(canonicalBytes({ chain_id: this.chainId, block_hash: settlementEvidenceBase.block_hash, block_number: settlementEvidenceBase.block_number, source: "evm_receipt_v1" }))
         : undefined;
 
       return {
         settled: receiptStatus === "success",
         settlement_backend: this.settlementBackendId,
         settlement_tx: checkpoint.settlement_tx,
-        settlement_evidence: settlementEvidenceBase && settlementEventHash && receiptProofSourceCommitment
+        settlement_evidence: settlementEvidenceBase && settlementEventHash && receiptProofSourceCommitment && finalitySourceCommitment
           ? {
               ...settlementEvidenceBase,
               settlement_event_hash: settlementEventHash,
-              settlement_event_index: 0,
               receipt_proof_source_commitment: receiptProofSourceCommitment,
-              chain_proof_commitment: sha256Hex(canonicalBytes({ settlement_event_hash: settlementEventHash, receipt_proof_source_commitment: receiptProofSourceCommitment }))
+              finality_source_commitment: finalitySourceCommitment,
+              chain_proof_commitment: sha256Hex(
+                canonicalBytes({
+                  settlement_event_hash: settlementEventHash,
+                  receipt_proof_source_commitment: receiptProofSourceCommitment,
+                  finality_source_commitment: finalitySourceCommitment
+                })
+              )
             }
           : undefined
       };

@@ -171,13 +171,16 @@ function actualRedactionState(input: VerifyTSLInput): ProofBundleV1["redaction_m
   );
   const privateGraph = Boolean(input.graph_feature_vector && !["aggregate_only", "public"].includes(input.graph_feature_vector.privacy_disclosure_level));
   const privateMetadata = Boolean(input.metadata_fingerprints?.some((fingerprint) => fingerprint.scope_class !== "public_commitment"));
-  const redacted = new Set<string>(input.redaction_manifest?.metadata_fields_redacted ?? []);
+  const redacted = new Set<string>();
   if (!rawContent) redacted.add("raw_content");
   if (!contentSalt) redacted.add("content_salt");
   if (!exactCounterparties) redacted.add("exact_counterparties");
   if (!restrictedAttestations) redacted.add("restricted_attestations");
   if (!privateGraph) redacted.add("private_graph");
   if (!privateMetadata) redacted.add("private_metadata");
+  if (input.proof_bundle) {
+    for (const field of ["platform", "ip_address", "user_agent"]) redacted.add(field);
+  }
   return {
     raw_content_included: rawContent,
     content_salt_included: contentSalt,
@@ -200,17 +203,9 @@ function redactionManifestMatches(input: VerifyTSLInput): boolean {
   if (input.redaction_manifest.raw_content_included !== actual.raw_content_included) return false;
   if (input.redaction_manifest.content_salt_included !== undefined && input.redaction_manifest.content_salt_included !== actual.content_salt_included) return false;
   if (input.redaction_manifest.exact_counterparties_included !== actual.exact_counterparties_included) return false;
-  const declared = new Set(input.redaction_manifest.metadata_fields_redacted);
-  if (!actual.raw_content_included && !declared.has("raw_content")) return false;
-  if (actual.raw_content_included && declared.has("raw_content")) return false;
-  if (!actual.content_salt_included && !declared.has("content_salt")) return false;
-  if (actual.content_salt_included && declared.has("content_salt")) return false;
-  if (!actual.exact_counterparties_included && !declared.has("exact_counterparties")) return false;
-  for (const field of ["platform", "ip_address", "user_agent"]) {
-    if (input.proof_bundle && !declared.has(field)) return false;
-  }
-  if (!actual.metadata_fields_redacted.includes("private_graph") && declared.has("private_graph")) return false;
-  return true;
+  const declared = [...new Set(input.redaction_manifest.metadata_fields_redacted)].sort();
+  const expected = [...new Set(actual.metadata_fields_redacted)].sort();
+  return JSON.stringify(declared) === JSON.stringify(expected);
 }
 
 function checkpointRootForKind(checkpoint: BatchCheckpointV1, kind: string): string | undefined {
@@ -232,7 +227,12 @@ function settlementEventHash(evidence: NonNullable<VerifyTSLInput["settlement_ev
       transaction_receipt_hash: evidence.transaction_receipt_hash,
       block_hash: evidence.block_hash,
       block_number: evidence.block_number,
+      receipt_root: evidence.receipt_root,
+      transaction_index: evidence.transaction_index,
       receipt_status: evidence.receipt_status,
+      settlement_event_index: evidence.settlement_event_index,
+      event_topic_hash: evidence.event_topic_hash,
+      log_index: evidence.log_index,
       submitter: evidence.submitter.toLowerCase()
     })
   );
@@ -254,20 +254,53 @@ function settlementEvidenceMatchesCheckpoint(input: VerifyTSLInput, checkpointHa
     const backendMatches = !expectedBackend || evidence.settlement_backend === expectedBackend;
     const eventHash = evidence.settlement_event_hash ? settlementEventHash(evidence) : undefined;
     const eventHashMatches = Boolean(eventHash && evidence.settlement_event_hash === eventHash);
-    const proofCommitmentMatches =
-      Boolean(evidence.receipt_proof_source_commitment) &&
-      evidence.chain_proof_commitment ===
-        sha256Hex(canonicalBytes({ settlement_event_hash: evidence.settlement_event_hash, receipt_proof_source_commitment: evidence.receipt_proof_source_commitment }));
-    const receiptProofPresent =
-      evidence.receipt_status === "success" &&
+	    const proofCommitmentMatches =
+	      Boolean(evidence.receipt_proof_source_commitment) &&
+	      evidence.chain_proof_commitment ===
+	        sha256Hex(
+	          canonicalBytes({
+	            settlement_event_hash: evidence.settlement_event_hash,
+	            receipt_proof_source_commitment: evidence.receipt_proof_source_commitment,
+	            finality_source_commitment: evidence.finality_source_commitment
+	          })
+	        );
+	    const offlineProofSourceCommitment =
+	      evidence.evidence_kind === "offline_receipt_log_proof"
+	        ? sha256Hex(
+	            canonicalBytes({
+	              block_header_rlp: evidence.block_header_rlp,
+	              receipt_rlp: evidence.receipt_rlp,
+	              receipt_proof_nodes: evidence.receipt_proof_nodes,
+	              receipt_root: evidence.receipt_root,
+	              transaction_index: evidence.transaction_index,
+	              log_index: evidence.log_index,
+	              finality_proof: evidence.finality_proof
+	            })
+	          )
+	        : undefined;
+	    const offlineProofMatches =
+	      evidence.evidence_kind !== "offline_receipt_log_proof" ||
+	      (Boolean(evidence.block_header_rlp) &&
+	        Boolean(evidence.receipt_rlp) &&
+	        Boolean(evidence.receipt_proof_nodes?.length) &&
+	        Boolean(evidence.finality_proof) &&
+	        evidence.receipt_proof_source_commitment === offlineProofSourceCommitment &&
+	        evidence.finality_source_commitment === evidence.finality_proof?.source_commitment);
+	    const receiptProofPresent =
+	      evidence.receipt_status === "success" &&
       Boolean(evidence.transaction_receipt_hash) &&
       Boolean(evidence.block_hash) &&
       evidence.block_number !== undefined &&
+      Boolean(evidence.receipt_root) &&
+      evidence.transaction_index !== undefined &&
+      Boolean(evidence.event_topic_hash) &&
+      evidence.log_index !== undefined &&
+      Boolean(evidence.finality_source_commitment) &&
       Boolean(evidence.chain_proof_commitment) &&
       evidence.settlement_tx === evidence.transaction_receipt_hash;
-    return identityMatches && fieldsHashMatches && backendMatches && eventHashMatches && proofCommitmentMatches && evidence.status === "settled" && receiptProofPresent;
-  });
-}
+	    return identityMatches && fieldsHashMatches && backendMatches && eventHashMatches && proofCommitmentMatches && offlineProofMatches && evidence.status === "settled" && receiptProofPresent;
+	  });
+	}
 
 async function disclosureConsentAllows(input: VerifyTSLInput, fieldClasses: string[], resolver: TrustResolver, policy: VerifierPolicy): Promise<boolean> {
   const consents = input.disclosure_consents ?? [];
@@ -843,7 +876,19 @@ export async function verifyTSL(
             manifoldProfile.cluster_centroid_commitment &&
             manifoldProfile.covariance_commitment
         );
-        if (!commitmentsPresent) {
+        const openingsPresent = Boolean(
+          manifoldProfile.trusted_centroid_bps?.length &&
+            manifoldProfile.adversarial_centroid_bps?.length &&
+            manifoldProfile.cluster_centroid_bps?.length &&
+            manifoldProfile.inverse_covariance_bps?.length
+        );
+        const commitmentsMatch = Boolean(
+          manifoldProfile.trusted_centroid_commitment === sha256Hex(canonicalBytes(manifoldProfile.trusted_centroid_bps ?? [])) &&
+            manifoldProfile.adversarial_centroid_commitment === sha256Hex(canonicalBytes(manifoldProfile.adversarial_centroid_bps ?? [])) &&
+            manifoldProfile.cluster_centroid_commitment === sha256Hex(canonicalBytes(manifoldProfile.cluster_centroid_bps ?? [])) &&
+            manifoldProfile.covariance_commitment === sha256Hex(canonicalBytes(manifoldProfile.inverse_covariance_bps ?? []))
+        );
+        if (!commitmentsPresent || !openingsPresent || !commitmentsMatch) {
           checks.graph_artifacts_valid = false;
           errors.push("TSL_MANIFOLD_PROFILE_UNSUPPORTED");
         }
@@ -939,17 +984,25 @@ export async function verifyTSL(
 	              : "TSL_GRAPH_EVIDENCE_INVALID"
 	        );
 	      }
-	    }
+    }
     if (input.graph_profile && input.graph_feature_vector && evidenceGraph) {
-      const recomputed = computeGraphFeatureVectorV0({
-        subject: input.graph_feature_vector.subject,
-        graph: evidenceGraph,
-        graph_profile_id: input.graph_profile.profile_id,
-        graph_profile: input.graph_profile,
-        trusted_seeds: input.trusted_seeds,
-        adversarial_seeds: input.adversarial_seeds,
-        computed_at: input.graph_feature_vector.computed_at
-      });
+      let recomputed;
+      try {
+        recomputed = computeGraphFeatureVectorV0({
+          subject: input.graph_feature_vector.subject,
+          graph: evidenceGraph,
+          graph_profile_id: input.graph_profile.profile_id,
+          graph_profile: input.graph_profile,
+          trusted_seeds: input.trusted_seeds,
+          adversarial_seeds: input.adversarial_seeds,
+          computed_at: input.graph_feature_vector.computed_at
+        });
+      } catch (error) {
+        checks.graph_artifacts_valid = false;
+        errors.push(error instanceof Error && error.message === "TSL_MANIFOLD_PROFILE_UNSUPPORTED" ? "TSL_MANIFOLD_PROFILE_UNSUPPORTED" : "TSL_GRAPH_ARTIFACTS_INVALID");
+        recomputed = undefined;
+      }
+      if (recomputed) {
       const graphMatches =
         recomputed.weighted_degree_bps === input.graph_feature_vector.weighted_degree_bps &&
         recomputed.reciprocity_bps === input.graph_feature_vector.reciprocity_bps &&
@@ -968,6 +1021,9 @@ export async function verifyTSL(
 	        recomputed.pagerank_bps === input.graph_feature_vector.pagerank_bps &&
 	        recomputed.ppr_lite_bps === input.graph_feature_vector.ppr_lite_bps &&
 	        recomputed.ppr_distance_bps === input.graph_feature_vector.ppr_distance_bps &&
+	        recomputed.trusted_seed_distance_proxy_bps === input.graph_feature_vector.trusted_seed_distance_proxy_bps &&
+	        recomputed.adversarial_seed_distance_proxy_bps === input.graph_feature_vector.adversarial_seed_distance_proxy_bps &&
+	        recomputed.cluster_distance_proxy_bps === input.graph_feature_vector.cluster_distance_proxy_bps &&
 	        recomputed.trusted_manifold_distance_bps === input.graph_feature_vector.trusted_manifold_distance_bps &&
 	        recomputed.adversarial_manifold_distance_bps === input.graph_feature_vector.adversarial_manifold_distance_bps &&
 	        recomputed.cluster_distance_bps === input.graph_feature_vector.cluster_distance_bps &&
@@ -981,6 +1037,7 @@ export async function verifyTSL(
       const fullGraphMatches = graphMatches && graphCommitmentsMatch;
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && fullGraphMatches;
       if (!fullGraphMatches) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
+      }
     }
     if (input.sybil_assessment && input.graph_profile && evidenceGraph) {
         const sybilProfile = input.sybil_profile;

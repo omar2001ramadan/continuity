@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS trust_assessments_v2 (
     risk_label TEXT NOT NULL,
     evidence_coverage_hash TEXT,
     evidence_commitment TEXT CHECK (evidence_commitment IS NULL OR evidence_commitment ~ '^0x[0-9a-f]{64}$'),
+    feature_vector_commitment TEXT CHECK (feature_vector_commitment IS NULL OR feature_vector_commitment ~ '^0x[0-9a-f]{64}$'),
     issued_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     canonical_body BYTEA NOT NULL,
