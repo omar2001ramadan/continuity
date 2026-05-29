@@ -7,6 +7,7 @@ export * from "./identity";
 export * from "./merkle";
 export * from "./nonMembership";
 export * from "./persistence/postgres";
+export * from "./proofBundle";
 export * from "./queue/redis";
 export * from "./queue/topics";
 export * from "./relayStore";

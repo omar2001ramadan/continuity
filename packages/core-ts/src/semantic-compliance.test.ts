@@ -21,6 +21,7 @@ import {
   verifyThresholdProofAsync,
   zkCircuitReleaseManifestHash,
   zkProofUsesRegisteredCircuit,
+  filterProofBundleDisclosures,
   type SettlementBackend
 } from "./index";
 import { InMemoryRelayStore, RelayValidationError } from "./relayStore";
@@ -219,6 +220,43 @@ describe("semantic compliance hardening", () => {
     expect(graph.edges[1]).toMatchObject({ src: bob.id, dst: alice.id });
   });
 
+  it("redacts receipts and restricted attestations from proof bundles by default", () => {
+    const alice = buildIdentityFromSeed({ trust_id: "did:tsl:test:alice", key_id: "#alice", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
+    const bob = buildIdentityFromSeed({ trust_id: "did:tsl:test:bob", key_id: "#bob", seed_hex: bobSeed, created_at: "2026-01-01T00:00:00Z" });
+    const signed = signMessageEvent({ sender: alice.id, signing_key_id: "#alice", seed_hex: aliceSeed, message: "bundle", timestamp: at });
+    const receipt = signReceipt(
+      {
+        type: "tsl.receipt_commitment.v1",
+        event_commitment: signed.commitment_hash,
+        receiver: bob.id,
+        signing_key_id: "#bob",
+        receipt_class: "received",
+        timestamp: at
+      },
+      bobSeed
+    );
+    const filtered = filterProofBundleDisclosures({
+      type: "tsl.proof_bundle.v1",
+      bundle_id: signed.commitment_hash,
+      created_at: at,
+      identity: alice,
+      envelope: signed.envelope,
+      proof: { type: "tsl.inclusion_proof.v1", tree_kind: "event", commitment: signed.commitment_hash, leaf_index: 0, leaf_hash: signed.commitment_hash, root: signed.commitment_hash, epoch_start_ms: 0, epoch_duration_ms: 300000, shard: "test", path: [], checkpoint_hash: zero },
+      checkpoint: { type: "tsl.batch_checkpoint.v1", epoch_start_ms: 0, epoch_duration_ms: 300000, shard: "test", event_root: signed.commitment_hash, receipt_root: zero, attestation_root: zero, revocation_root: zero, event_count: 1, receipt_count: 0, previous_checkpoint: zero, relay_id: "did:tsl:relay:test", relay_signature: "0x00" },
+      receipts: [receipt],
+      attestations: [
+        { type: "tsl.attestation.v1", issuer: bob.id, subject: alice.id, attestation_class: "known_business", claim_commitment: sha256Hex("public"), visibility: "public", issued_at: at, signature: "0x00" },
+        { type: "tsl.attestation.v1", issuer: bob.id, subject: alice.id, attestation_class: "private_claim", claim_commitment: sha256Hex("private"), visibility: "private", issued_at: at, signature: "0x00" }
+      ],
+      redaction_manifest: { raw_content_included: false, exact_counterparties_included: true, metadata_fields_redacted: [] }
+    });
+    expect(filtered.receipts).toBeUndefined();
+    expect(filtered.attestations?.map((attestation) => attestation.visibility)).toEqual(["public"]);
+    expect(filtered.redaction_manifest.exact_counterparties_included).toBe(false);
+    expect(filtered.redaction_manifest.metadata_fields_redacted).toContain("exact_counterparties");
+    expect(filtered.redaction_manifest.metadata_fields_redacted).toContain("restricted_attestations");
+  });
+
   it("rejects raw-edge protocol graph input and recomputes event-only graph claims", async () => {
     expect(() => constructGraphV0({ edges: [] } as never)).toThrow(/TSL_RAW_EDGE_PROTOCOL_INPUT_REJECTED/);
 
@@ -251,7 +289,7 @@ describe("semantic compliance hardening", () => {
     expect(result.errors).toContain("TSL_GRAPH_ARTIFACTS_INVALID");
   });
 
-  it("supports deterministic louvain/leiden profiles and PageRank-like seed distance fields", () => {
+  it("supports deterministic louvain/leiden aliases and PageRank-like seed distance fields", async () => {
     const graph = constructGraphFromRawEdgesForTestV0({
       edges: [
         { src: "did:tsl:a", dst: "did:tsl:b", type: "signed_event", timestamp: at, weight_bps: 8000 },
@@ -292,7 +330,7 @@ describe("semantic compliance hardening", () => {
       subject: "did:tsl:a",
       graph,
       graph_profile_id: "graph-leiden-rc4",
-      graph_profile: { ...baseProfile, profile_id: "graph-leiden-rc4", community_detection: { ...baseProfile.community_detection, algorithm: "leiden_refinement_v1" } },
+      graph_profile: { ...baseProfile, profile_id: "graph-leiden-rc4", community_detection: { ...baseProfile.community_detection, algorithm: "leiden" } },
       trusted_seeds: ["did:tsl:trusted"],
       adversarial_seeds: ["did:tsl:bad"],
       computed_at: at
@@ -306,6 +344,24 @@ describe("semantic compliance hardening", () => {
     expect(louvain.pagerank_bps).toBeGreaterThan(0);
     expect(louvain.adversarial_proximity_bps).toBeLessThan(9000);
     expect(louvain.recomputation_commitment).toMatch(/^0x[0-9a-f]{64}$/);
+    const decayedIdentity = buildIdentityFromSeed({ trust_id: "did:tsl:a", key_id: "#a", seed_hex: aliceSeed, created_at: "2026-01-01T00:00:00Z" });
+    const oldEvent = signMessageEvent({ sender: decayedIdentity.id, signing_key_id: "#a", seed_hex: aliceSeed, message: "old", timestamp: "2026-02-26T12:00:00Z" });
+    const decayedGraph = await constructGraphFromEvidenceV0({
+      events: [oldEvent.envelope],
+      resolver: { resolveTrustID: () => decayedIdentity },
+      graph_profile: { ...baseProfile, temporal_decay_profile: "default_decay_v2", community_detection: { ...baseProfile.community_detection, algorithm: "louvain" } },
+      at_time: at,
+      event_receivers: { [oldEvent.commitment_hash]: "did:tsl:b" }
+    });
+    const decayed = computeGraphFeatureVectorV0({
+      subject: "did:tsl:a",
+      graph: decayedGraph,
+      graph_profile_id: "graph-default-decay",
+      graph_profile: { ...baseProfile, temporal_decay_profile: "default_decay_v2", community_detection: { ...baseProfile.community_detection, algorithm: "louvain" } },
+      computed_at: at
+    });
+    expect(decayed.community_algorithm_id).toBe("louvain_modularity_v1");
+    expect(decayed.weighted_degree_bps).toBeLessThan(6000);
   });
 
   it("detects Sybil concentration and dormant drift with deterministic labels", () => {
@@ -603,6 +659,7 @@ describe("semantic compliance hardening", () => {
     expect(verifySparseMerkleProof(absent, tree.root, tree.profile)).toBe(true);
     expect(verifySparseMerkleProof({ ...absent, root: zero, set_root: zero }, tree.root, tree.profile)).toBe(false);
     expect(verifySparseMerkleProof({ ...absent, sibling_path: absent.sibling_path?.slice(1) }, tree.root, tree.profile)).toBe(false);
+    expect(verifySparseMerkleProof({ ...absent, leaf_index: ((absent.leaf_index ?? 0) + 1) % 256 }, tree.root, tree.profile)).toBe(false);
   });
 
   it("binds sparse non-membership proofs to checkpoint revocation roots", async () => {
@@ -626,6 +683,7 @@ describe("semantic compliance hardening", () => {
       relay_signature: "0x00"
     };
     const checkpoint = { ...checkpointBase, relay_signature: signEd25519(checkpointHash(checkpointBase), relaySeed) };
+    expect(checkpointHash({ ...checkpointBase, settlement_backend: "eip155:1", settlement_tx: "0xabc" })).not.toBe(checkpointHash(checkpointBase));
     const absent = proveSparseMerkleNonMembership(sha256Hex("not-revoked") as Hex32, tree, identity.id, at, checkpointHash(checkpoint));
     const accepted = await verifyTSL(
       { envelope: signed.envelope, checkpoint, non_membership_proofs: [absent] },

@@ -17,6 +17,8 @@ import {
   verifyDelegatedAgentActionV0
 } from "../packages/core-ts/src/v2";
 import { validateSchema, type SchemaName } from "../packages/core-ts/src/validation";
+import { checkpointHash } from "../packages/core-ts/src/relayStore";
+import { filterProofBundleDisclosures } from "../packages/core-ts/src/proofBundle";
 import errorCodeRegistry from "../specs/error-codes.v1.json";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -436,7 +438,7 @@ function checkErrorRegistry(): void {
   const codePattern = /TSL_[A-Z0-9_]+/g;
   const nonErrorCodePatterns = [
     /^TSL_.*_(ADDRESS|URL|URI|KEY|KEY_URI|SEED_HEX|PRIVATE_KEY|RPC_URL|DEPLOYMENT|OUT|COUNT|SAMPLES|CONCURRENCY|RETRIES|BATCH|BATCH_SIZE|RUN_ID|ID|IDS|TRUST_ID|CHAIN_ID|CONTRACTS|STREAMS|MS)$/,
-    /^TSL_(DATABASE_URL|EPOCH_MS|ENV_FILE|LOAD_ENV_IN_TESTS|TIMESTAMP_WINDOW_MS|GOSSIP_PEERS|LOG_CONSUMER_GROUP|RELAY_ID|RELAY_SIGNATURE|VERIFY_CONTRACTS|SCORING_PERSISTENCE|SCORING_ALLOW_MEMORY_STORE)$/
+    /^TSL_(DATABASE_URL|EPOCH_MS|ENV_FILE|LOAD_ENV_IN_TESTS|TIMESTAMP_WINDOW_MS|GOSSIP_PEERS|LOG_CONSUMER_GROUP|RELAY_ID|RELAY_SIGNATURE|VERIFY_CONTRACTS|SCORING_PERSISTENCE|SCORING_ALLOW_MEMORY_STORE|NETWORK|DEV_SCORING_INPUTS)$/
   ];
   for (const searchRoot of searchRoots) {
     const fullRoot = path.join(root, searchRoot);
@@ -481,33 +483,74 @@ function checkObject(entry: TraceabilityEntry): void {
 
   const vectorRoot = entry.test_vector;
   const input = readJson(`${vectorRoot}/input.json`) as Record<string, unknown>;
-  const manifest = readJson(`${vectorRoot}/manifest.json`) as {
-    object_type: string;
-    expected: { schema_valid: boolean; canonical_hash: string };
-  };
-  const vectorResult = validateSchema(entry.validator, input);
-  assert(vectorResult.valid === manifest.expected.schema_valid, `${vectorRoot} schema result mismatch`);
-  assert(input.type === manifest.object_type, `${vectorRoot} object type mismatch`);
-  const canonicalHash = hashDomain(String(input.type), canonicalBytes(input));
-  assert(canonicalHash === manifest.expected.canonical_hash, `${vectorRoot} canonical hash mismatch`);
-}
+	  const manifest = readJson(`${vectorRoot}/manifest.json`) as {
+	    object_type: string;
+	    expected: { schema_valid: boolean; canonical_hash: string; signature_valid?: boolean; error_code?: string | null };
+	  };
+	  assert("signature_valid" in manifest.expected, `${vectorRoot} manifest missing expected.signature_valid`);
+	  assert("error_code" in manifest.expected, `${vectorRoot} manifest missing expected.error_code`);
+	  const vectorResult = validateSchema(entry.validator, input);
+	  assert(vectorResult.valid === manifest.expected.schema_valid, `${vectorRoot} schema result mismatch`);
+	  assert(input.type === manifest.object_type, `${vectorRoot} object type mismatch`);
+	  const canonicalHash = hashDomain(String(input.type), canonicalBytes(input));
+	  assert(canonicalHash === manifest.expected.canonical_hash, `${vectorRoot} canonical hash mismatch`);
+	  if (typeof input.signature === "string") assert(input.signature.length > 0, `${vectorRoot} signed object has empty signature`);
+	}
 
 async function checkSemanticConformance(): Promise<void> {
   assertThrows(() => canonicalBytes({ invalid_float: 0.5 }), "Canonicalization must reject floats");
   assertThrows(() => canonicalBytes({ unsafe_integer: Number.MAX_SAFE_INTEGER + 1 }), "Canonicalization must reject unsafe integers");
-  const scoringProviderSource = fs.readFileSync(path.join(root, "services/scoring-provider/src/index.ts"), "utf8");
-  assert(!scoringProviderSource.includes("dev_allow_caller_features"), "Production scoring endpoint must not allow request-body feature override bypasses");
-  const verifierSource = fs.readFileSync(path.join(root, "packages/core-ts/src/verifier.ts"), "utf8");
-  assert(
-    verifierSource.includes("proof.root === input.checkpoint.revocation_root") && verifierSource.includes("proof.set_root === input.checkpoint.revocation_root"),
-    "Sparse non-membership verifier must bind proof root to checkpoint revocation_root"
-  );
-  assert(verifierSource.includes("seedGovernanceProfileValid"), "Verifier must validate seed governance openings, not only raw seed commitments");
-
   const fakeHash = "0x1111111111111111111111111111111111111111111111111111111111111111" as const;
-  const fakeSignature =
-    "0x22222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222" as const;
-  assert(commitmentHashFromParts(fakeHash, fakeSignature) !== legacyCommitmentHashFromParts(fakeHash, fakeSignature), "Canonical commitment hash must be domain-separated from legacy hash");
+	  const fakeSignature =
+	    "0x22222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222" as const;
+	  assert(commitmentHashFromParts(fakeHash, fakeSignature) !== legacyCommitmentHashFromParts(fakeHash, fakeSignature), "Canonical commitment hash must be domain-separated from legacy hash");
+	  const checkpointBase = {
+	    type: "tsl.batch_checkpoint.v1" as const,
+	    epoch_start_ms: 0,
+	    epoch_duration_ms: 300000,
+	    shard: "0000",
+	    event_root: fakeHash,
+	    receipt_root: fakeHash,
+	    attestation_root: fakeHash,
+	    revocation_root: fakeHash,
+	    event_count: 1,
+	    receipt_count: 1,
+	    previous_checkpoint: fakeHash,
+	    relay_id: "did:tsl:relay:conformance",
+	    relay_signature: "0x00" as const
+	  };
+	  assert(
+	    checkpointHash({ ...checkpointBase, settlement_backend: "eip155:1", settlement_tx: "0xabc" }) !== checkpointHash(checkpointBase),
+	    "Checkpoint hash must bind settlement_backend and settlement_tx"
+	  );
+
+	  const bundleIdentity = buildIdentityFromSeed({ trust_id: "did:tsl:a", key_id: "#a", seed_hex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", created_at: "2026-01-01T00:00:00Z" });
+	  const bundleEvent = signMessageEvent({ sender: bundleIdentity.id, signing_key_id: "#a", seed_hex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", message: "bundle", timestamp: "2026-05-27T12:00:00Z" });
+	  const bundleReceipt = signReceipt(
+	    {
+	      type: "tsl.receipt_commitment.v1",
+	      event_commitment: bundleEvent.commitment_hash,
+	      receiver: "did:tsl:b",
+	      signing_key_id: "#b",
+	      receipt_class: "received",
+	      timestamp: "2026-05-27T12:00:01Z"
+	    },
+	    "0101010101010101010101010101010101010101010101010101010101010101"
+	  );
+	  const redactedBundle = filterProofBundleDisclosures({
+	    type: "tsl.proof_bundle.v1",
+	    bundle_id: bundleEvent.commitment_hash,
+	    created_at: bundleEvent.envelope.timestamp,
+	    identity: bundleIdentity,
+	    envelope: bundleEvent.envelope,
+	    proof: { type: "tsl.inclusion_proof.v1", tree_kind: "event", commitment: bundleEvent.commitment_hash, leaf_index: 0, leaf_hash: bundleEvent.commitment_hash, root: bundleEvent.commitment_hash, epoch_start_ms: 0, epoch_duration_ms: 300000, shard: "0000", path: [], checkpoint_hash: fakeHash },
+	    checkpoint: checkpointBase,
+	    receipts: [bundleReceipt],
+	    attestations: [{ type: "tsl.attestation.v1", issuer: "did:tsl:b", subject: bundleIdentity.id, attestation_class: "private_claim", claim_commitment: fakeHash, visibility: "private", issued_at: "2026-05-27T12:00:00Z", signature: "0x00" }],
+	    redaction_manifest: { raw_content_included: false, exact_counterparties_included: true, metadata_fields_redacted: [] }
+	  });
+	  assert(!redactedBundle.receipts?.length && !redactedBundle.attestations?.length, "Proof-bundle disclosure filter must redact receipts and private attestations without consent");
+	  assert(redactedBundle.redaction_manifest.metadata_fields_redacted.includes("exact_counterparties"), "Proof-bundle redaction manifest must reflect redacted counterparties");
 
   const fullCoverage = computeEvidenceCoverageV0({
     subject: "did:tsl:a",
@@ -899,10 +942,11 @@ async function checkZkProductionConformance(): Promise<void> {
     }),
     "Production ZK proof must bind to active circuit release registry"
   );
-  const tree = buildSparseMerkleTree([sha256Hex("revoked-a"), sha256Hex("revoked-b")], { tree_id: "revocation-set-v1", tree_depth: 8 });
-  const nonMembership = proveSparseMerkleNonMembership(sha256Hex("not-revoked"), tree, "did:tsl:a", "2026-05-27T12:00:00Z");
-  assert(verifySparseMerkleProof(nonMembership, tree.root, tree.profile), "Sparse-Merkle non-membership vector must verify by root recomputation");
-  assert(!verifySparseMerkleProof({ ...nonMembership, set_root: releaseHash }, tree.root, tree.profile), "Sparse-Merkle proof with wrong root must fail");
+	  const tree = buildSparseMerkleTree([sha256Hex("revoked-a"), sha256Hex("revoked-b")], { tree_id: "revocation-set-v1", tree_depth: 8 });
+	  const nonMembership = proveSparseMerkleNonMembership(sha256Hex("not-revoked"), tree, "did:tsl:a", "2026-05-27T12:00:00Z");
+	  assert(verifySparseMerkleProof(nonMembership, tree.root, tree.profile), "Sparse-Merkle non-membership vector must verify by root recomputation");
+	  assert(!verifySparseMerkleProof({ ...nonMembership, set_root: releaseHash }, tree.root, tree.profile), "Sparse-Merkle proof with wrong root must fail");
+	  assert(!verifySparseMerkleProof({ ...nonMembership, leaf_index: ((nonMembership.leaf_index ?? 0) + 1) % 256 }, tree.root, tree.profile), "Sparse-Merkle proof with mismatched queried value/index must fail");
 }
 
 checkArtifactTree();

@@ -37,6 +37,8 @@
         "algorithm": {
           "enum": [
             "connected_components",
+            "louvain",
+            "leiden",
             "leiden_refinement_v0",
             "louvain_modularity_v0",
             "leiden_refinement_v1",

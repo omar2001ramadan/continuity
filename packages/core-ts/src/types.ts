@@ -340,6 +340,8 @@ export interface GraphProfileV2 {
     algorithm:
       | "connected_components"
       | "connected_components_v0"
+      | "louvain"
+      | "leiden"
       | "louvain_modularity_v0"
       | "leiden_refinement_v0"
       | "louvain_modularity_v1"
@@ -479,7 +481,7 @@ export interface DriftReportV1 {
   sparse_mode?: "none" | "insufficient_baseline" | "cohort_baseline";
   recomputation_status?: "not_supplied" | "recomputed_match" | "recomputed_mismatch" | "provider_claim";
   drift_score_bps: number;
-  drift_label: "stable" | "minor" | "moderate" | "severe" | "dormant_reactivation" | "insufficient_baseline";
+  drift_label: "stable" | "minor" | "moderate" | "high" | "severe" | "dormant_reactivation" | "insufficient_baseline";
   action: "none" | "lower_confidence" | "step_up" | "human_review" | "temporary_block";
   reason_codes: string[];
   component_scores_bps?: Partial<Record<"key" | "graph" | "action" | "cadence" | "claim" | "agent" | "local", number>>;
@@ -835,6 +837,13 @@ export interface VerifierPolicy {
   require_manifest_verification_key_hash?: boolean;
   reject_dev_zk_circuits?: boolean;
   reject_unsigned_local_proof_bundles?: boolean;
+  require_authorized_relay?: boolean;
+  authorized_relays?: TrustID[];
+  require_receipt_inclusion_for_disclosed_receipts?: boolean;
+  require_profile_derived_scoring?: boolean;
+  require_behavioral_sybil_tiers?: boolean;
+  require_fixed_point_drift?: boolean;
+  reject_unsafe_fixtures_on_mainnet?: boolean;
   accepted_auditors?: TrustID[];
   accepted_governance_policy?: string;
   accepted_scoring_providers?: TrustID[];
@@ -885,6 +894,7 @@ export interface VerificationChecks {
   drift_report_valid?: boolean;
   delegated_action_valid?: boolean;
   receipt_included?: boolean;
+  authorized_relay_valid?: boolean;
   attestation_included?: boolean;
   revocation_included?: boolean;
 }
@@ -903,6 +913,7 @@ export interface VerificationResult {
 export interface VerifyTSLInput {
   envelope: EventCommitmentV1;
   proof?: InclusionProofV1;
+  receipt_proofs?: InclusionProofV1[];
   checkpoint?: BatchCheckpointV1;
   receipts?: ReceiptCommitmentV1[];
   attestations?: AttestationV1[];

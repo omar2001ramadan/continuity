@@ -54,6 +54,7 @@ export function createVerifierApi() {
       const input: VerifyTSLInput = {
         envelope: req.body.envelope,
         proof: req.body.proof,
+        receipt_proofs: req.body.receipt_proofs,
         checkpoint: req.body.checkpoint,
         message_disclosure: req.body.message_disclosure,
         receipts: req.body.receipts,

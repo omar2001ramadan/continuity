@@ -17,6 +17,10 @@ export interface BuildGroth16ThresholdProofInput extends BuildThresholdProofInpu
   circuit_id?: string;
   verification_key_id?: string;
   release_manifest_hash?: Hex32;
+  receipt_leaves?: string[];
+  receipt_salts?: string[];
+  counterparty_commitments?: string[];
+  receipt_valid?: number[];
 }
 
 type SnarkJsModule = {
@@ -90,29 +94,47 @@ export async function buildGroth16ThresholdProof(input: BuildGroth16ThresholdPro
   const subjectHash = subjectHashField(input.subject);
   const zeroPath = ["0", "0", "0", "0"];
   const zeroBits = [0, 0, 0, 0];
-  const receiptLeaves = Array.from({ length: 8 }, (_, index) => (BigInt(subjectHash) + BigInt(index + 1) + BigInt(index + 101)).toString());
-  const receiptSalts = Array.from({ length: 8 }, (_, index) => String(index + 1));
-  const counterpartyCommitments = Array.from({ length: 8 }, (_, index) => String(index + 101));
-  const circuitInput =
-    input.claim === "identity_age_days"
-      ? {
-          creation_epoch_day: 0,
-          current_epoch_day: input.value,
-          threshold: input.threshold,
-          subject_hash: subjectHash,
-          registry_leaf: subjectHash,
-          registry_path: zeroPath,
-          registry_path_bits: zeroBits
-        }
-      : {
-          reciprocal_receipt_count: input.value,
-          threshold: input.threshold,
-          subject_hash: subjectHash,
-          receipt_leaves: receiptLeaves,
-          receipt_salts: receiptSalts,
-          counterparty_commitments: counterpartyCommitments,
-          receipt_valid: Array.from({ length: 8 }, () => 1)
-        };
+  let circuitInput: Record<string, unknown>;
+  if (input.claim === "identity_age_days") {
+    circuitInput = {
+      creation_epoch_day: 0,
+      current_epoch_day: input.value,
+      threshold: input.threshold,
+      subject_hash: subjectHash,
+      registry_leaf: subjectHash,
+      registry_path: zeroPath,
+      registry_path_bits: zeroBits
+    };
+  } else if (input.claim === "reciprocal_receipt_count") {
+    const unsafeSynthetic = process.env.ALLOW_UNSAFE_ZK_SYNTHETIC_RECEIPTS === "true";
+    const receiptLeaves =
+      input.receipt_leaves ?? (unsafeSynthetic ? Array.from({ length: 8 }, (_, index) => (BigInt(subjectHash) + BigInt(index + 1) + BigInt(index + 101)).toString()) : undefined);
+    const receiptSalts =
+      input.receipt_salts ?? (unsafeSynthetic ? Array.from({ length: 8 }, (_, index) => String(index + 1)) : undefined);
+    const counterpartyCommitments =
+      input.counterparty_commitments ?? (unsafeSynthetic ? Array.from({ length: 8 }, (_, index) => String(index + 101)) : undefined);
+    const receiptValid = input.receipt_valid ?? (unsafeSynthetic ? Array.from({ length: 8 }, () => 1) : undefined);
+    if (!receiptLeaves?.length || !receiptSalts?.length || !counterpartyCommitments?.length || !receiptValid?.length) {
+      throw new Error("TSL_ZK_RECEIPT_WITNESS_REQUIRED");
+    }
+    circuitInput = {
+      reciprocal_receipt_count: input.value,
+      threshold: input.threshold,
+      subject_hash: subjectHash,
+      receipt_leaves: receiptLeaves,
+      receipt_salts: receiptSalts,
+      counterparty_commitments: counterpartyCommitments,
+      receipt_valid: receiptValid
+    };
+  } else if (process.env.ALLOW_UNSAFE_ZK_UNSUPPORTED_CIRCUITS === "true") {
+    circuitInput = {
+      value: input.value,
+      threshold: input.threshold,
+      subject_hash: subjectHash
+    };
+  } else {
+    throw new Error("TSL_ZK_CIRCUIT_UNSUPPORTED_PRODUCTION_CLAIM");
+  }
   const { proof, publicSignals: rawPublicSignals } = await snarkjs.groth16.fullProve(
     circuitInput,
     input.wasm_path,
@@ -209,7 +231,12 @@ export async function verifyThresholdProofAsync(
   } = {}
 ): Promise<boolean> {
   if (!verifyThresholdProof(proof)) return false;
-  if (!proof.groth16) return process.env.ALLOW_UNSAFE_ZK_HASH_FIXTURES === "true";
+  if (options.reject_dev_circuits && process.env.TSL_NETWORK === "mainnet") {
+    for (const flag of ["ALLOW_UNSAFE_ZK_HASH_FIXTURES", "ALLOW_UNSAFE_ZK_SYNTHETIC_RECEIPTS", "ALLOW_UNSAFE_ZK_UNSUPPORTED_CIRCUITS"]) {
+      if (process.env[flag] === "true") return false;
+    }
+  }
+  if (!proof.groth16) return process.env.ALLOW_UNSAFE_ZK_HASH_FIXTURES === "true" && !(options.reject_dev_circuits && process.env.TSL_NETWORK === "mainnet");
   if (!proof.groth16.verification_key) return false;
   const signals = proof.groth16.public_signals.map(String);
   if (proof.public_signal_commitment && proof.public_signal_commitment !== publicSignalCommitment(signals)) return false;

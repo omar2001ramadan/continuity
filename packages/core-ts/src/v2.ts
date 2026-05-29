@@ -281,15 +281,15 @@ export function computeReferenceScoreV0(input: ReferenceScoreV0Input): TrustAsse
           ? "medium_trust"
           : input.evidence_coverage.coverage_bps < input.domain_policy.min_coverage_bps || input.evidence_coverage.coverage_bps < 2500
             ? "insufficient_evidence"
-          : score_bps >= thresholds.suspicious_bps && input.has_adverse_evidence === true
+          : score_bps < thresholds.high_risk_bps
+            ? "high_risk"
+          : score_bps < thresholds.suspicious_bps && input.has_adverse_evidence === true
             ? "suspicious"
-          : score_bps >= thresholds.suspicious_bps
+          : score_bps < thresholds.suspicious_bps
             ? "unknown_caution"
-            : score_bps >= thresholds.high_risk_bps && input.has_adverse_evidence === true
-              ? "high_risk"
-              : input.has_adverse_evidence === true
-                ? "high_risk"
-                : "unknown_caution";
+            : input.has_adverse_evidence === true
+              ? "suspicious"
+              : "unknown_caution";
   return {
     type: "tsl.trust_assessment.v2",
     assessment_id: sha256Hex(canonicalBytes({ subject: input.subject, score_bps, at: input.issued_at })),
@@ -368,11 +368,31 @@ function graphBaseWeightBps(profile: GraphProfileV2, edgeType: string): number {
 
 function graphDecayBps(profile: GraphProfileV2, edgeType: string, timestamp: RFC3339, atTime: RFC3339): number {
   const decay = profile as unknown as { half_life_days?: Record<string, number> };
-  const halfLifeDays = decay.half_life_days?.[edgeType];
+  const defaultDecayProfile: Record<string, number> =
+    profile.temporal_decay_profile === "default_decay_v2" || profile.temporal_decay_profile === "half-life-180d"
+      ? {
+          signed_event: 90,
+          received: 180,
+          replied: 180,
+          transacted: 365,
+          completed: 365,
+          disputed: 30,
+          attestation: 180,
+          delegation: 365,
+          code_release: 365
+        }
+      : {};
+  const halfLifeDays = decay.half_life_days?.[edgeType] ?? decay.half_life_days?.attestation ?? defaultDecayProfile[edgeType];
   if (!halfLifeDays || halfLifeDays <= 0) return 10000;
   const ageMs = Math.max(0, Date.parse(atTime) - Date.parse(timestamp));
   const ageDays = ageMs / 86400000;
   return clampBps(Math.floor(10000 * 2 ** (-ageDays / halfLifeDays)));
+}
+
+function normalizeCommunityAlgorithm(algorithm: GraphProfileV2["community_detection"]["algorithm"]): string {
+  if (algorithm === "louvain") return "louvain_modularity_v1";
+  if (algorithm === "leiden") return "leiden_refinement_v1";
+  return algorithm;
 }
 
 function issuerQualityBps(profile: GraphProfileV2, issuer?: TrustID): number {
@@ -441,15 +461,17 @@ export async function constructGraphFromEvidenceV0(input: {
     });
     const sender = eventSenderByCommitment.get(receipt.event_commitment);
     if (!valid || !sender) continue;
-    edges.push({
+    const edge: GraphEdgeV0 = {
       src: receipt.receiver,
       dst: sender,
       type: receipt.receipt_class,
       timestamp: receipt.timestamp,
       weight_bps: graphBaseWeightBps(input.graph_profile, receipt.receipt_class),
       decay_bps: graphDecayBps(input.graph_profile, receipt.receipt_class, receipt.timestamp, input.at_time),
-      receipt_status_bps: receipt.receipt_class === "disputed" ? 5000 : 10000
-    });
+      receipt_status_bps: receipt.receipt_class === "disputed" ? 5000 : 10000,
+      ...(receipt.metadata_commitment ? { evidence_commitment: receipt.metadata_commitment } : {})
+    };
+    if (negativeEvidenceAllowed(edge, input.graph_profile)) edges.push(edge);
   }
 
   for (const attestation of [...(input.attestations ?? [])].sort((a, b) => a.issued_at.localeCompare(b.issued_at) || attestationHash(a).localeCompare(attestationHash(b)))) {
@@ -462,7 +484,7 @@ export async function constructGraphFromEvidenceV0(input: {
       signature: attestation.signature
     });
     if (!valid || (attestation.expires_at && Date.parse(attestation.expires_at) <= Date.parse(input.at_time))) continue;
-    edges.push({
+    const edge: GraphEdgeV0 = {
       src: attestation.issuer,
       dst: attestation.subject,
       type: `attestation:${attestation.attestation_class}`,
@@ -470,8 +492,10 @@ export async function constructGraphFromEvidenceV0(input: {
       weight_bps: graphBaseWeightBps(input.graph_profile, "attestation"),
       source_quality_bps: issuerQualityBps(input.graph_profile, attestation.issuer),
       decay_bps: graphDecayBps(input.graph_profile, "attestation", attestation.issued_at, input.at_time),
-      issuer: attestation.issuer
-    });
+      issuer: attestation.issuer,
+      evidence_commitment: attestation.claim_commitment
+    };
+    if (negativeEvidenceAllowed(edge, input.graph_profile)) edges.push(edge);
   }
 
   for (const policy of [...(input.delegation_policies ?? [])].sort((a, b) => a.valid_from.localeCompare(b.valid_from) || delegationPolicyV2Hash(a).localeCompare(delegationPolicyV2Hash(b)))) {
@@ -506,6 +530,13 @@ function isNegativeGraphEdge(edge: GraphEdgeV0): boolean {
     edge.type.includes("revoked") ||
     edge.type.includes("appealed_negative")
   );
+}
+
+function negativeEvidenceAllowed(edge: GraphEdgeV0, graphProfile: GraphProfileV2): boolean {
+  if (!isNegativeGraphEdge(edge)) return true;
+  if (graphProfile.negative_edge_policy.requires_evidence_commitment && !edge.evidence_commitment) return false;
+  if (graphProfile.negative_edge_policy.requires_appeal_uri && !edge.appeal_uri && !edge.appeal_status) return false;
+  return true;
 }
 
 function effectiveWeight(edge: GraphEdgeV0, graphProfile?: GraphProfileV2): number {
@@ -631,6 +662,41 @@ function normalizeCommunityIds(assignments: Map<TrustID, number>): Map<TrustID, 
   return output;
 }
 
+function applyMinClusterSize(graph: GraphV0, graphProfile: GraphProfileV2, assignments: Map<TrustID, number>): Map<TrustID, number> {
+  const minSize = graphProfile.community_detection.min_cluster_size ?? 1;
+  if (minSize <= 1) return normalizeCommunityIds(assignments);
+  const output = new Map(assignments);
+  const groups = () => {
+    const current = new Map<number, TrustID[]>();
+    for (const [node, community] of output.entries()) {
+      const nodes = current.get(community) ?? [];
+      nodes.push(node);
+      current.set(community, nodes);
+    }
+    return current;
+  };
+  for (const [community, nodes] of [...groups().entries()].sort((a, b) => a[0] - b[0])) {
+    if (nodes.length >= minSize) continue;
+    const candidateMass = new Map<number, number>();
+    for (const edge of graph.edges) {
+      const srcSmall = nodes.includes(edge.src);
+      const dstSmall = nodes.includes(edge.dst);
+      if (srcSmall === dstSmall) continue;
+      const other = srcSmall ? edge.dst : edge.src;
+      const otherCommunity = output.get(other);
+      if (otherCommunity === undefined || otherCommunity === community) continue;
+      const otherSize = groups().get(otherCommunity)?.length ?? 0;
+      if (otherSize < minSize) continue;
+      candidateMass.set(otherCommunity, (candidateMass.get(otherCommunity) ?? 0) + Math.max(0, signedEffectiveWeight(edge, graphProfile)));
+    }
+    const best = [...candidateMass.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
+    if (best !== undefined) {
+      for (const node of nodes) output.set(node, best);
+    }
+  }
+  return normalizeCommunityIds(output);
+}
+
 function undirectedPositiveMass(graph: GraphV0, graphProfile: GraphProfileV2): Map<string, number> {
   const floor = graphProfile.community_detection.edge_weight_floor_bps ?? 0;
   const pairMass = new Map<string, number>();
@@ -741,8 +807,17 @@ function deterministicLeidenRefinementV1(graph: GraphV0, graphProfile: GraphProf
 function communityResult(graph: GraphV0, graphProfile?: GraphProfileV2): CommunityResultV1 {
   const assignments = communityAssignments(graph, graphProfile);
   if (!graphProfile) return { assignments, modularity_bps: 0, pass_count: 1 };
-  if (graphProfile.community_detection.algorithm === "louvain_modularity_v1") return deterministicLouvainModularityV1(graph, graphProfile);
-  if (graphProfile.community_detection.algorithm === "leiden_refinement_v1") return deterministicLeidenRefinementV1(graph, graphProfile);
+  const algorithm = normalizeCommunityAlgorithm(graphProfile.community_detection.algorithm);
+  if (algorithm === "louvain_modularity_v1") {
+    const result = deterministicLouvainModularityV1(graph, graphProfile);
+    const applied = applyMinClusterSize(graph, graphProfile, result.assignments);
+    return { assignments: applied, modularity_bps: modularityBps(graph, graphProfile, applied), pass_count: result.pass_count };
+  }
+  if (algorithm === "leiden_refinement_v1") {
+    const result = deterministicLeidenRefinementV1(graph, graphProfile);
+    const applied = applyMinClusterSize(graph, graphProfile, result.assignments);
+    return { assignments: applied, modularity_bps: modularityBps(graph, graphProfile, applied), pass_count: result.pass_count };
+  }
   return { assignments, modularity_bps: modularityBps(graph, graphProfile, assignments), pass_count: 1 };
 }
 
@@ -751,14 +826,21 @@ function communityAssignments(graph: GraphV0, graphProfile?: GraphProfileV2): Ma
   if (graphProfile.community_detection.algorithm === "none") {
     return new Map([...graph.nodes].sort().map((node, index) => [node, index]));
   }
-  const algorithm = graphProfile.community_detection.algorithm;
+  const algorithm = normalizeCommunityAlgorithm(graphProfile.community_detection.algorithm);
   const floor = graphProfile.community_detection.edge_weight_floor_bps ?? 1000;
-  if (algorithm === "connected_components" || algorithm === "connected_components_v0") return connectedComponents(graph, floor);
-  if (algorithm === "louvain_modularity_v0") return deterministicWeightedLabelPropagation(graph, graphProfile);
-  if (algorithm === "leiden_refinement_v0") return deterministicLeidenRefinement(graph, graphProfile);
-  if (algorithm === "louvain_modularity_v1") return deterministicLouvainModularityV1(graph, graphProfile).assignments;
-  if (algorithm === "leiden_refinement_v1") return deterministicLeidenRefinementV1(graph, graphProfile).assignments;
-  return connectedComponents(graph, floor);
+  const assignments =
+    algorithm === "connected_components" || algorithm === "connected_components_v0"
+      ? connectedComponents(graph, floor)
+      : algorithm === "louvain_modularity_v0"
+        ? deterministicWeightedLabelPropagation(graph, graphProfile)
+        : algorithm === "leiden_refinement_v0"
+          ? deterministicLeidenRefinement(graph, graphProfile)
+          : algorithm === "louvain_modularity_v1"
+            ? deterministicLouvainModularityV1(graph, graphProfile).assignments
+            : algorithm === "leiden_refinement_v1"
+              ? deterministicLeidenRefinementV1(graph, graphProfile).assignments
+              : connectedComponents(graph, floor);
+  return applyMinClusterSize(graph, graphProfile, assignments);
 }
 
 function componentOfSubject(graph: GraphV0, subject: TrustID, graphProfile?: GraphProfileV2): Set<TrustID> {
@@ -917,7 +999,7 @@ export function computeGraphFeatureVectorV0(input: {
 	    effective_counterparty_count_milli: totalMass === 0 ? 0 : Math.floor(Math.exp((entropy / 10000) * Math.log(Math.max(1, counterpartySet.size))) * 1000),
 	    seed_escape_bps: bps(seedMass, totalMass),
 	    adversarial_proximity_bps: bps(adversarialMass, totalMass),
-	    community_algorithm_id: input.graph_profile?.community_detection.algorithm ?? "connected_components_v0",
+		    community_algorithm_id: input.graph_profile ? normalizeCommunityAlgorithm(input.graph_profile.community_detection.algorithm) : "connected_components_v0",
 	    community_escape_bps: bps(communityEscapeMass, communityMass),
 	    community_diversity_bps: clampBps(10000 - communityHhi),
 	    conductance_bps: bps(communityEscapeMass, communityMass + communityEscapeMass),
@@ -967,6 +1049,72 @@ export function computeSybilAssessmentV0(input: {
   const cluster = componentOfSubject(input.graph, input.subject, input.graph_profile);
   const trustedSeedSet = new Set(input.trusted_seeds ?? []);
   const adversarialSeedSet = new Set(input.adversarial_seeds ?? []);
+  const tier = input.sybil_profile?.adversary_tier ?? "B2";
+  const tierPolicy: Record<SybilAssessmentV1["adversary_tier_assumed"], {
+    risk_adjustment_bps: number;
+    high_threshold_bps: number;
+    elevated_threshold_bps: number;
+    contamination_threshold_bps: number;
+    cost_multiplier_bps: number;
+    min_evidence_mass: number;
+    default_scenario: string;
+  }> = {
+    B0: {
+      risk_adjustment_bps: -750,
+      high_threshold_bps: 7800,
+      elevated_threshold_bps: 6800,
+      contamination_threshold_bps: 3500,
+      cost_multiplier_bps: 7000,
+      min_evidence_mass: 500,
+      default_scenario: "low_capability_dense_farm"
+    },
+    B1: {
+      risk_adjustment_bps: -250,
+      high_threshold_bps: 7400,
+      elevated_threshold_bps: 6400,
+      contamination_threshold_bps: 3000,
+      cost_multiplier_bps: 8500,
+      min_evidence_mass: 750,
+      default_scenario: "basic_aged_farm"
+    },
+    B2: {
+      risk_adjustment_bps: 0,
+      high_threshold_bps: 7000,
+      elevated_threshold_bps: 6500,
+      contamination_threshold_bps: 2500,
+      cost_multiplier_bps: 10000,
+      min_evidence_mass: 1000,
+      default_scenario: "reference_cluster_assessment"
+    },
+    B3: {
+      risk_adjustment_bps: 400,
+      high_threshold_bps: 6600,
+      elevated_threshold_bps: 5900,
+      contamination_threshold_bps: 2200,
+      cost_multiplier_bps: 13500,
+      min_evidence_mass: 1250,
+      default_scenario: "compromised_account_cluster"
+    },
+    B4: {
+      risk_adjustment_bps: 750,
+      high_threshold_bps: 6200,
+      elevated_threshold_bps: 5500,
+      contamination_threshold_bps: 1800,
+      cost_multiplier_bps: 18000,
+      min_evidence_mass: 1500,
+      default_scenario: "issuer_collusion_bridge"
+    },
+    B5: {
+      risk_adjustment_bps: 1100,
+      high_threshold_bps: 5800,
+      elevated_threshold_bps: 5000,
+      contamination_threshold_bps: 1500,
+      cost_multiplier_bps: 25000,
+      min_evidence_mass: 2000,
+      default_scenario: "relay_provider_auditor_consistency_attack"
+    }
+  };
+  const tierConfig = tierPolicy[tier];
   const internalEdges = input.graph.edges.filter((edge) => cluster.has(edge.src) && cluster.has(edge.dst));
   const touchingEdges = input.graph.edges.filter((edge) => cluster.has(edge.src) || cluster.has(edge.dst));
   const internalMass = internalEdges.reduce((sum, edge) => sum + Math.max(0, signedEffectiveWeight(edge, input.graph_profile)), 0);
@@ -1028,28 +1176,30 @@ export function computeSybilAssessmentV0(input: {
         (10000 - trustedEscape) * 10 +
         (10000 - externalDiversity) * 6) /
         100
-    )
+    ) + tierConfig.risk_adjustment_bps
   );
-  const minEvidenceMass = input.sybil_profile?.min_evidence_mass ?? 1000;
+  const minEvidenceMass = input.sybil_profile?.min_evidence_mass ?? tierConfig.min_evidence_mass;
   const risk_label =
     touchingMass < minEvidenceMass
       ? "insufficient_evidence"
       : concentration > 8500 && trustedEscape < 500
         ? "high"
-      : seedContamination > 2500
+      : seedContamination > tierConfig.contamination_threshold_bps
         ? "elevated"
-      : risk_score_bps >= 6500
+      : risk_score_bps >= tierConfig.high_threshold_bps
+          ? "high"
+      : risk_score_bps >= tierConfig.elevated_threshold_bps
           ? "elevated"
           : internalReceiptRatio > 7500 && trustedEscape < 1500
             ? "medium"
             : "low";
   const costComponents = {
-    identity_cost_minor_units: cluster.size * (input.sybil_profile?.base_identity_cost_minor_units ?? 25000),
-    time_aging_cost_minor_units: cluster.size * (input.sybil_profile?.time_aging_cost_minor_units ?? 1000),
-    external_receipt_cost_minor_units: Math.floor((externalMass / 10000) * (input.sybil_profile?.external_receipt_cost_minor_units ?? 7500)),
-    attestation_cost_minor_units: internalEdges.filter((edge) => edge.type.includes("attestation")).length * (input.sybil_profile?.attestation_cost_minor_units ?? 10000),
-    compromise_cost_minor_units: input.sybil_profile?.compromise_cost_minor_units ?? 0,
-    evasion_cost_minor_units: Math.floor((risk_score_bps / 10000) * (input.sybil_profile?.evasion_cost_minor_units ?? 5000))
+    identity_cost_minor_units: Math.floor((cluster.size * (input.sybil_profile?.base_identity_cost_minor_units ?? 25000) * tierConfig.cost_multiplier_bps) / 10000),
+    time_aging_cost_minor_units: Math.floor((cluster.size * (input.sybil_profile?.time_aging_cost_minor_units ?? 1000) * tierConfig.cost_multiplier_bps) / 10000),
+    external_receipt_cost_minor_units: Math.floor(((externalMass / 10000) * (input.sybil_profile?.external_receipt_cost_minor_units ?? 7500) * tierConfig.cost_multiplier_bps) / 10000),
+    attestation_cost_minor_units: Math.floor((internalEdges.filter((edge) => edge.type.includes("attestation")).length * (input.sybil_profile?.attestation_cost_minor_units ?? 10000) * tierConfig.cost_multiplier_bps) / 10000),
+    compromise_cost_minor_units: Math.floor(((input.sybil_profile?.compromise_cost_minor_units ?? 0) * tierConfig.cost_multiplier_bps) / 10000),
+    evasion_cost_minor_units: Math.floor(((risk_score_bps / 10000) * (input.sybil_profile?.evasion_cost_minor_units ?? 5000) * tierConfig.cost_multiplier_bps) / 10000)
   };
   const attackCost = Object.values(costComponents).reduce((sum, value) => sum + value, 0) + Math.floor(internalMass / 10000) * (input.sybil_profile?.internal_edge_cost_minor_units ?? 5000);
   const seedSetCommitment = sha256Hex(
@@ -1069,7 +1219,7 @@ export function computeSybilAssessmentV0(input: {
     evidence_commitment: input.evidence_commitment ?? sha256Hex(canonicalBytes({ graph_hash: sha256Hex(canonicalBytes(input.graph)), seed_set_commitment: seedSetCommitment })),
     cluster_id_commitment: sha256Hex(canonicalBytes({ subject: input.subject, graph_profile_id: input.graph_profile.profile_id })),
     computed_at: input.computed_at ?? new Date().toISOString(),
-    adversary_tier_assumed: input.sybil_profile?.adversary_tier ?? "B2",
+    adversary_tier_assumed: tier,
     cluster_size_bucket: `${cluster.size}-${cluster.size}`,
     cluster_concentration_bps: concentration,
     trusted_escape_bps: trustedEscape,
@@ -1082,7 +1232,7 @@ export function computeSybilAssessmentV0(input: {
     attack_cost_minor_units: Math.max(0, attackCost),
     cost_components: costComponents,
     expected_benefit_minor_units: input.sybil_profile?.expected_benefit_minor_units ?? 0,
-    attack_scenario: input.sybil_profile?.attack_scenario ?? "reference_cluster_assessment",
+    attack_scenario: input.sybil_profile?.attack_scenario ?? tierConfig.default_scenario,
     risk_score_bps,
     risk_label,
     privacy_level: "cluster_commitment_only",
@@ -1094,29 +1244,48 @@ export function sybilAssessmentV1Hash(assessment: SybilAssessmentUnsignedV1 | Sy
   return hashSignedObject(V2_DOMAIN_TAGS.SYBIL_ASSESSMENT_V1, assessment as unknown as Record<string, unknown>);
 }
 
-function invertRegularizedMatrix(matrix: number[][], regularization: number): number[][] | null {
+function fixedPointSqrt(value: number): number {
+  if (value <= 0) return 0;
+  let low = 0;
+  let high = Math.max(1, value);
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const square = mid * mid;
+    if (square === value) return mid;
+    if (square < value) low = mid + 1;
+    else high = mid - 1;
+  }
+  return high;
+}
+
+function invertRegularizedMatrixFixed(matrix: number[][], regularization: number): number[][] | null {
   const size = matrix.length;
   if (!size || matrix.some((row) => row.length !== size)) return null;
+  const scale = 1_000_000n;
   const augmented = matrix.map((row, rowIndex) => [
-    ...row.map((value, columnIndex) => value + (rowIndex === columnIndex ? regularization : 0)),
-    ...Array.from({ length: size }, (_, columnIndex) => (columnIndex === rowIndex ? 1 : 0))
+    ...row.map((value, columnIndex) => BigInt(Math.trunc(value + (rowIndex === columnIndex ? regularization : 0)))),
+    ...Array.from({ length: size }, (_, columnIndex) => (columnIndex === rowIndex ? 1n : 0n))
   ]);
   for (let column = 0; column < size; column += 1) {
     let pivot = column;
     for (let row = column + 1; row < size; row += 1) {
-      if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) pivot = row;
+      if (absBigInt(augmented[row][column]) > absBigInt(augmented[pivot][column])) pivot = row;
     }
-    if (Math.abs(augmented[pivot][column]) < 1e-9) return null;
+    if (augmented[pivot][column] === 0n) return null;
     if (pivot !== column) [augmented[pivot], augmented[column]] = [augmented[column], augmented[pivot]];
     const pivotValue = augmented[column][column];
-    for (let item = 0; item < size * 2; item += 1) augmented[column][item] /= pivotValue;
+    for (let item = 0; item < size * 2; item += 1) augmented[column][item] = (augmented[column][item] * scale) / pivotValue;
     for (let row = 0; row < size; row += 1) {
       if (row === column) continue;
       const factor = augmented[row][column];
-      for (let item = 0; item < size * 2; item += 1) augmented[row][item] -= factor * augmented[column][item];
+      for (let item = 0; item < size * 2; item += 1) augmented[row][item] -= (factor * augmented[column][item]) / scale;
     }
   }
-  return augmented.map((row) => row.slice(size));
+  return augmented.map((row) => row.slice(size).map((value) => Number(value)));
+}
+
+function absBigInt(value: bigint): bigint {
+  return value < 0n ? -value : value;
 }
 
 export function computeDriftReportV0(input: {
@@ -1173,12 +1342,18 @@ export function computeDriftReportV0(input: {
         timestamp: new Date(atMs - (input.observation_window_days + index + 1) * 86400000).toISOString(),
         components
       }));
-      return computeDriftReportV0({
+      const cohortReport = computeDriftReportV0({
         ...input,
         feature_history: [...syntheticHistory, ...(input.feature_history ?? [])],
         cohort_baseline_components: undefined,
         signature: input.signature
       });
+      return {
+        ...cohortReport,
+        sparse_mode: "cohort_baseline",
+        reason_codes: [...new Set(["COHORT_BASELINE", ...cohortReport.reason_codes])],
+        covariance_profile_commitment: sha256Hex(canonicalBytes({ estimator: "robust_median_covariance_fixed_point_v1", regularization: 10000, sparse_mode: "cohort_baseline" }))
+      };
     }
     return {
       type: "tsl.drift_report.v1",
@@ -1238,16 +1413,16 @@ export function computeDriftReportV0(input: {
 	    const center = medianVector(baselineVectors);
 	    const covariance = covarianceMatrix(baselineVectors, center);
 	    const observationMean = componentKeys.map((_, index) => Math.floor(observationVectors.reduce((sum, vector) => sum + (vector[index] ?? 0), 0) / observationVectors.length));
-	    const inverse = invertRegularizedMatrix(covariance, 10000);
+	    const inverse = invertRegularizedMatrixFixed(covariance, 10000);
 	    if (!inverse) return 0;
 	    const delta = componentKeys.map((_, index) => observationMean[index] - center[index]);
-	    let quadratic = 0;
+	    let quadraticScaled = 0;
 	    for (let row = 0; row < delta.length; row += 1) {
 	      for (let column = 0; column < delta.length; column += 1) {
-	        quadratic += delta[row] * inverse[row][column] * delta[column];
+	        quadraticScaled += Math.trunc((delta[row] * inverse[row][column] * delta[column]) / 1_000_000);
 	      }
 	    }
-	    return clampBps(Math.floor(Math.sqrt(Math.max(0, quadratic)) * 1000));
+	    return clampBps(fixedPointSqrt(Math.max(0, quadraticScaled)) * 1000);
 	  };
   const derivedComponents: Partial<Record<(typeof componentKeys)[number], number>> = {};
   for (const component of componentKeys) {
@@ -1278,7 +1453,25 @@ export function computeDriftReportV0(input: {
   const historyAdverse = observationHistory.some((point) => point.adverse_evidence);
   const drift = Math.max(robustDistance(baselineValues, observationValues), robustMahalanobisBps(), componentDrift);
   const dormant = (daysSinceLastVerifiedEvent ?? 0) >= (input.dormant_days ?? 90) && (input.high_value_action === true || input.new_delegation_pattern === true || historyHighValue || historyNewDelegation);
-  const severeAdverse = (input.adverse_evidence === true || historyAdverse) && drift >= 7000;
+  const severeAdverse = (input.adverse_evidence === true || historyAdverse) && drift >= 5000;
+  const driftLabel = dormant
+    ? "dormant_reactivation"
+    : severeAdverse || drift >= 7500
+      ? "severe"
+      : drift >= 5000
+        ? "high"
+        : drift >= 2500
+          ? "moderate"
+          : "stable";
+  const driftAction = dormant
+    ? "step_up"
+    : driftLabel === "severe"
+      ? "human_review"
+      : driftLabel === "high"
+        ? "step_up"
+        : driftLabel === "moderate"
+          ? "lower_confidence"
+          : "none";
   return {
     type: "tsl.drift_report.v1",
     subject: input.subject,
@@ -1288,19 +1481,19 @@ export function computeDriftReportV0(input: {
     observation_window_days: input.observation_window_days,
     feature_history_commitment: input.feature_history ? sha256Hex(canonicalBytes(input.feature_history)) : undefined,
     baseline_profile_commitment: sha256Hex(canonicalBytes({ baseline_window_days: input.baseline_window_days, min_baseline_points: input.min_baseline_points ?? 2 })),
-    covariance_profile_commitment: sha256Hex(canonicalBytes({ estimator: "robust_median_covariance_diagonal_regularized_v0", regularization: 10000 })),
+    covariance_profile_commitment: sha256Hex(canonicalBytes({ estimator: "robust_median_covariance_fixed_point_v1", regularization: 10000 })),
     ...(lastVerifiedEventAt ? { last_verified_event_at: lastVerifiedEventAt } : {}),
     ...(daysSinceLastVerifiedEvent !== undefined ? { days_since_last_verified_event: Math.max(0, daysSinceLastVerifiedEvent) } : {}),
     sparse_mode: "none",
     recomputation_status: "recomputed_match",
     drift_score_bps: dormant ? Math.max(drift, 8000) : drift,
-    drift_label: dormant ? "dormant_reactivation" : severeAdverse || drift >= 7000 ? "severe" : drift >= 4000 ? "moderate" : drift >= 1500 ? "minor" : "stable",
-    action: dormant ? "step_up" : severeAdverse || drift >= 7000 ? "human_review" : drift >= 4000 ? "lower_confidence" : "none",
+    drift_label: driftLabel,
+    action: driftAction,
     reason_codes: dormant
       ? ["DORMANT_REACTIVATION", "NEW_HIGH_VALUE_ACTION", ...componentValues.map(([component]) => `DRIFT_${component.toUpperCase()}`)]
       : [
           ...(input.adverse_evidence ? ["ADVERSE_EVIDENCE"] : []),
-          ...componentValues.filter(([, score]) => score >= 1500).map(([component]) => `DRIFT_${component.toUpperCase()}`)
+          ...componentValues.filter(([, score]) => score >= 2500).map(([component]) => `DRIFT_${component.toUpperCase()}`)
         ],
     component_scores_bps: componentScores,
     signature: input.signature ?? ("0x00" as HexSig)

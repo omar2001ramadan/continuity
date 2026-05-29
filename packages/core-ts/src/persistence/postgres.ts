@@ -13,6 +13,7 @@ import {
   ZERO_HASH
 } from "../crypto";
 import { buildInclusionProof, buildMerkleTree } from "../merkle";
+import { filterProofBundleDisclosures, type ProofBundleDisclosureOptions } from "../proofBundle";
 import { checkpointHash, shardForTrustID } from "../relayStore";
 import type {
   AttestationV1,
@@ -21,6 +22,7 @@ import type {
   Hex32,
   IdentityDocumentV1,
   InclusionProofV1,
+  ProofBundleV1,
   ReceiptCommitmentV1,
   RevocationV1,
   TrustAssessmentV1,
@@ -574,7 +576,7 @@ export class PostgresRepository {
     return body ? (JSON.parse(Buffer.from(body).toString("utf8")) as TrustAssessmentV1) : null;
   }
 
-  async buildProofBundleForEvent(commitment: Hex32): Promise<Record<string, unknown> | null> {
+  async buildProofBundleForEvent(commitment: Hex32, disclosureOptions: ProofBundleDisclosureOptions = {}): Promise<ProofBundleV1 | null> {
     const proof = await this.buildInclusionProofFor("event", commitment);
     const envelope = await this.getEvent(commitment);
     if (!proof || !envelope) return null;
@@ -583,7 +585,7 @@ export class PostgresRepository {
     const attestations = await this.getAttestationsForSubject(envelope.sender);
     const revocations = await this.getRevocations(envelope.sender);
     const assessment = await this.getLatestAssessmentForSubject(envelope.sender);
-    return {
+    const bundle: ProofBundleV1 = {
       type: "tsl.proof_bundle.v1",
       bundle_id: commitment,
       created_at: envelope.timestamp,
@@ -606,10 +608,32 @@ export class PostgresRepository {
       },
       ...(assessment ? { assessment } : {})
     };
+    return filterProofBundleDisclosures(bundle, disclosureOptions);
   }
 
   async insertCheckpoint(checkpoint: BatchCheckpointV1, status = "pending"): Promise<Hex32> {
     const hash = checkpointHash(checkpoint);
+    const previous = await this.pool.query(
+      `SELECT checkpoint_hash FROM checkpoints
+       WHERE shard = $1 AND epoch_start_ms < $2
+       ORDER BY epoch_start_ms DESC
+       LIMIT 1`,
+      [checkpoint.shard, checkpoint.epoch_start_ms]
+    );
+    const expectedPrevious = (previous.rows[0]?.checkpoint_hash as Hex32 | undefined) ?? ZERO_HASH;
+    if (checkpoint.previous_checkpoint !== expectedPrevious) {
+      throw new Error("TSL_CHECKPOINT_CHAIN_BROKEN");
+    }
+    const next = await this.pool.query(
+      `SELECT previous_checkpoint FROM checkpoints
+       WHERE shard = $1 AND epoch_start_ms > $2
+       ORDER BY epoch_start_ms ASC
+       LIMIT 1`,
+      [checkpoint.shard, checkpoint.epoch_start_ms]
+    );
+    if (next.rows[0]?.previous_checkpoint && next.rows[0].previous_checkpoint !== hash) {
+      throw new Error("TSL_CHECKPOINT_CHAIN_BROKEN");
+    }
     const inserted = await this.pool.query(
       `INSERT INTO checkpoints(
         checkpoint_hash, epoch_start_ms, epoch_duration_ms, shard, event_root, receipt_root,

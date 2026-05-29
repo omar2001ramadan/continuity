@@ -18,9 +18,9 @@ import { verifyConsistencyProof } from "./consistency";
 import { findVerificationMethod, keyActiveAt, notRevokedAt } from "./identity";
 import { verifyInclusion } from "./merkle";
 import { verifyNonMembershipProof } from "./nonMembership";
-import { checkpointHash } from "./relayStore";
+import { checkpointHash, legacyCheckpointHashV0 } from "./relayStore";
 import type { SettlementBackend } from "./settlement";
-import type { BatchCheckpointV1, SeedGovernanceProfileV1, TrustResolver, VerificationChecks, VerificationResult, VerifierPolicy, VerifyTSLInput } from "./types";
+import type { BatchCheckpointV1, Hex32, SeedGovernanceProfileV1, TrustResolver, VerificationChecks, VerificationResult, VerifierPolicy, VerifyTSLInput } from "./types";
 import { validateSchema } from "./validation";
 import { verifyThresholdProofAsync } from "./zk";
 import {
@@ -40,6 +40,16 @@ import {
   verifyDelegatedAgentActionV0
 } from "./v2";
 import type { GraphV0 } from "./v2";
+
+function checkpointHashForPolicy(checkpoint: BatchCheckpointV1): Hex32 {
+  return process.env.ALLOW_LEGACY_CHECKPOINT_HASH_V0 === "true" ? legacyCheckpointHashV0(checkpoint) : checkpointHash(checkpoint);
+}
+
+function normalizeGraphAlgorithm(algorithm: string | undefined): string | undefined {
+  if (algorithm === "louvain") return "louvain_modularity_v1";
+  if (algorithm === "leiden") return "leiden_refinement_v1";
+  return algorithm;
+}
 
 const defaultChecks = (): VerificationChecks => ({
   schema_valid: false,
@@ -121,6 +131,11 @@ export async function verifyTSL(
   const explanation: string[] = [];
   let settlementStatus: VerificationResult["settlement_status"] = policy.require_settlement ? "pending" : "not_required";
   let riskLabel: VerificationResult["risk_label"] = "not_assessed";
+  if (policy.reject_unsafe_fixtures_on_mainnet && process.env.TSL_NETWORK === "mainnet") {
+    for (const flag of ["ALLOW_UNSAFE_CHECKPOINT_SIGNATURE_FIXTURES", "ALLOW_UNSAFE_ZK_HASH_FIXTURES", "ALLOW_LEGACY_CHECKPOINT_HASH_V0"]) {
+      if (process.env[flag] === "true") errors.push("TSL_UNSAFE_FIXTURE_POLICY_ENABLED");
+    }
+  }
 
   const eventValidation = validateSchema("event", input.envelope);
   checks.schema_valid = eventValidation.valid;
@@ -240,6 +255,14 @@ export async function verifyTSL(
 
   if (input.receipts?.length) {
     checks.receipt_valid = true;
+    if (policy.require_receipt_inclusion_for_disclosed_receipts) {
+      const consent = await disclosureConsentAllows(input, ["exact_counterparties"], resolver, policy);
+      checks.disclosure_consent_valid = checks.disclosure_consent_valid !== false && consent;
+      if (!consent) {
+        checks.receipt_valid = false;
+        errors.push("TSL_DISCLOSURE_CONSENT_MISSING");
+      }
+    }
     for (const receipt of input.receipts) {
       const validation = validateSchema("receipt", receipt);
       if (!validation.valid) {
@@ -258,12 +281,41 @@ export async function verifyTSL(
         checks.receipt_valid = false;
         errors.push("TSL_RECEIPT_INVALID");
       }
+      if (policy.require_receipt_inclusion_for_disclosed_receipts) {
+        const receiptCommitment = receiptHash(receipt);
+        const receiptProof = input.receipt_proofs?.find((proof) => proof.commitment === receiptCommitment);
+        const receiptProofValid =
+          Boolean(
+            receiptProof &&
+              validateSchema("inclusionProof", receiptProof).valid &&
+              receiptProof.tree_kind === "receipt" &&
+              verifyInclusion(receiptProof) &&
+              (!input.checkpoint ||
+                (receiptProof.checkpoint_hash === checkpointHashForPolicy(input.checkpoint) &&
+                  receiptProof.root === input.checkpoint.receipt_root &&
+                  receiptProof.epoch_start_ms === input.checkpoint.epoch_start_ms &&
+                  receiptProof.shard === input.checkpoint.shard))
+          );
+        checks.receipt_included = checks.receipt_included !== false && receiptProofValid;
+        if (!receiptProofValid) {
+          checks.receipt_valid = false;
+          errors.push("TSL_RECEIPT_INCLUSION_INVALID");
+        }
+      }
     }
     if (checks.receipt_valid) explanation.push("Receipt signatures valid");
   }
 
   if (input.attestations?.length) {
     checks.attestation_valid = true;
+    if (policy.require_receipt_inclusion_for_disclosed_receipts && input.attestations.some((attestation) => attestation.visibility !== "public")) {
+      const consent = await disclosureConsentAllows(input, ["attestations"], resolver, policy);
+      checks.disclosure_consent_valid = checks.disclosure_consent_valid !== false && consent;
+      if (!consent) {
+        checks.attestation_valid = false;
+        errors.push("TSL_DISCLOSURE_CONSENT_MISSING");
+      }
+    }
     for (const attestation of input.attestations) {
       const validation = validateSchema("attestation", attestation);
       if (!validation.valid) {
@@ -478,12 +530,12 @@ export async function verifyTSL(
         checks.graph_artifacts_valid &&
         input.graph_feature_vector.subject === input.envelope.sender &&
         (!policy.require_research_graph_algorithm ||
-          input.graph_feature_vector.community_algorithm_id === input.graph_profile?.community_detection.algorithm) &&
+          input.graph_feature_vector.community_algorithm_id === normalizeGraphAlgorithm(input.graph_profile?.community_detection.algorithm)) &&
         subjectKey?.type === "ed25519" &&
         verifyEd25519(subjectKey.public_key, graphFeatureVectorV1Hash(input.graph_feature_vector), input.graph_feature_vector.signature);
     }
     if (policy.require_research_graph_algorithm) {
-      const algorithm = input.graph_profile?.community_detection.algorithm;
+      const algorithm = normalizeGraphAlgorithm(input.graph_profile?.community_detection.algorithm);
       checks.research_graph_algorithm_valid = algorithm === "louvain_modularity_v1" || algorithm === "leiden_refinement_v1";
       if (!checks.research_graph_algorithm_valid) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
       checks.graph_artifacts_valid = checks.graph_artifacts_valid && checks.research_graph_algorithm_valid;
@@ -588,8 +640,12 @@ export async function verifyTSL(
         recomputed.ppr_lite_bps === input.graph_feature_vector.ppr_lite_bps &&
         recomputed.modularity_bps === input.graph_feature_vector.modularity_bps &&
         recomputed.community_pass_count === input.graph_feature_vector.community_pass_count;
-      checks.graph_artifacts_valid = checks.graph_artifacts_valid && graphMatches;
-      if (!graphMatches) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
+      const graphCommitmentsMatch =
+        recomputed.recomputation_commitment === input.graph_feature_vector.recomputation_commitment &&
+        recomputed.privacy_disclosure_level === input.graph_feature_vector.privacy_disclosure_level;
+      const fullGraphMatches = graphMatches && graphCommitmentsMatch;
+      checks.graph_artifacts_valid = checks.graph_artifacts_valid && fullGraphMatches;
+      if (!fullGraphMatches) errors.push("TSL_GRAPH_ARTIFACTS_INVALID");
     }
     if (input.sybil_assessment && input.graph_profile && evidenceGraph) {
         const sybilProfile = input.sybil_profile;
@@ -607,6 +663,19 @@ export async function verifyTSL(
           recomputedSybil.cluster_concentration_bps === input.sybil_assessment.cluster_concentration_bps &&
           recomputedSybil.trusted_escape_bps === input.sybil_assessment.trusted_escape_bps &&
           recomputedSybil.internal_receipt_ratio_bps === input.sybil_assessment.internal_receipt_ratio_bps &&
+          recomputedSybil.seed_set_commitment === input.sybil_assessment.seed_set_commitment &&
+          recomputedSybil.evidence_commitment === input.sybil_assessment.evidence_commitment &&
+          recomputedSybil.cluster_id_commitment === input.sybil_assessment.cluster_id_commitment &&
+          recomputedSybil.adversary_tier_assumed === input.sybil_assessment.adversary_tier_assumed &&
+          recomputedSybil.creation_sync_bps === input.sybil_assessment.creation_sync_bps &&
+          recomputedSybil.issuer_reuse_bps === input.sybil_assessment.issuer_reuse_bps &&
+          recomputedSybil.external_diversity_bps === input.sybil_assessment.external_diversity_bps &&
+          recomputedSybil.seed_contamination_bps === input.sybil_assessment.seed_contamination_bps &&
+          recomputedSybil.receipt_symmetry_bps === input.sybil_assessment.receipt_symmetry_bps &&
+          recomputedSybil.attack_cost_minor_units === input.sybil_assessment.attack_cost_minor_units &&
+          JSON.stringify(recomputedSybil.cost_components) === JSON.stringify(input.sybil_assessment.cost_components) &&
+          recomputedSybil.expected_benefit_minor_units === input.sybil_assessment.expected_benefit_minor_units &&
+          recomputedSybil.attack_scenario === input.sybil_assessment.attack_scenario &&
           recomputedSybil.risk_score_bps === input.sybil_assessment.risk_score_bps &&
           recomputedSybil.risk_label === input.sybil_assessment.risk_label;
         checks.graph_artifacts_valid = checks.graph_artifacts_valid && sybilMatches;
@@ -628,7 +697,12 @@ export async function verifyTSL(
           recomputedDrift.drift_label === input.drift_report.drift_label &&
           recomputedDrift.action === input.drift_report.action &&
           recomputedDrift.feature_history_commitment === input.drift_report.feature_history_commitment &&
+          recomputedDrift.baseline_profile_commitment === input.drift_report.baseline_profile_commitment &&
           recomputedDrift.covariance_profile_commitment === input.drift_report.covariance_profile_commitment &&
+          recomputedDrift.sparse_mode === input.drift_report.sparse_mode &&
+          recomputedDrift.recomputation_status === input.drift_report.recomputation_status &&
+          recomputedDrift.last_verified_event_at === input.drift_report.last_verified_event_at &&
+          recomputedDrift.days_since_last_verified_event === input.drift_report.days_since_last_verified_event &&
           JSON.stringify(recomputedDrift.component_scores_bps ?? {}) === JSON.stringify(input.drift_report.component_scores_bps ?? {});
         checks.graph_artifacts_valid = checks.graph_artifacts_valid && driftMatches;
         if (!driftMatches) errors.push("TSL_DRIFT_ARTIFACT_INVALID");
@@ -744,7 +818,7 @@ export async function verifyTSL(
     let matchingConsistencyProof = false;
     for (const proof of input.consistency_proofs ?? []) {
       const validation = validateSchema("consistencyProof", proof);
-      const currentCheckpointHash = input.checkpoint ? checkpointHash(input.checkpoint) : undefined;
+      const currentCheckpointHash = input.checkpoint ? checkpointHashForPolicy(input.checkpoint) : undefined;
       const valid = validation.valid && verifyConsistencyProof(proof) && (!currentCheckpointHash || proof.to_checkpoint === currentCheckpointHash);
       if (valid) matchingConsistencyProof = true;
       if (!valid) {
@@ -770,7 +844,7 @@ export async function verifyTSL(
         !sparseRequired ||
         Boolean(
           input.checkpoint &&
-            proof.root_checkpoint === checkpointHash(input.checkpoint) &&
+            proof.root_checkpoint === checkpointHashForPolicy(input.checkpoint) &&
             proof.root === input.checkpoint.revocation_root &&
             proof.set_root === input.checkpoint.revocation_root
         );
@@ -830,7 +904,7 @@ export async function verifyTSL(
       const auditorKey = auditorIdentity?.verification_methods.find((method) => keyActiveAt(method, finding.issued_at));
       const signatureValid =
         auditorKey?.type === "ed25519" && verifyEd25519(auditorKey.public_key, auditFindingHash(finding), finding.signature);
-      const expectedCheckpointHash = input.checkpoint ? checkpointHash(input.checkpoint) : undefined;
+      const expectedCheckpointHash = input.checkpoint ? checkpointHashForPolicy(input.checkpoint) : undefined;
       const checkpointMatches =
         !input.checkpoint ||
         (finding.checkpoint_hash !== undefined && finding.checkpoint_hash === expectedCheckpointHash);
@@ -861,12 +935,21 @@ export async function verifyTSL(
     } else {
       const relayIdentity = await resolver.resolveTrustID(input.checkpoint.relay_id, input.envelope.timestamp);
       const relayKey = relayIdentity?.verification_methods.find((method) => keyActiveAt(method, input.envelope.timestamp));
-      const unsafeFixtureSignatureAllowed = process.env.ALLOW_UNSAFE_CHECKPOINT_SIGNATURE_FIXTURES === "true";
+      const unsafeFixtureSignatureAllowed =
+        process.env.ALLOW_UNSAFE_CHECKPOINT_SIGNATURE_FIXTURES === "true" &&
+        !(policy.reject_unsafe_fixtures_on_mainnet && process.env.TSL_NETWORK === "mainnet");
       checks.checkpoint_signature_valid =
         (unsafeFixtureSignatureAllowed && input.checkpoint.relay_signature === "0x00") ||
-        (relayKey?.type === "ed25519" && verifyEd25519(relayKey.public_key, checkpointHash(input.checkpoint), input.checkpoint.relay_signature));
+        (relayKey?.type === "ed25519" && verifyEd25519(relayKey.public_key, checkpointHashForPolicy(input.checkpoint), input.checkpoint.relay_signature));
       if (!checks.checkpoint_signature_valid) {
         errors.push("TSL_CHECKPOINT_SIGNATURE_INVALID");
+      }
+      if (policy.require_authorized_relay) {
+        checks.authorized_relay_valid = Boolean(
+          checks.checkpoint_signature_valid &&
+            (!policy.authorized_relays?.length || policy.authorized_relays.includes(input.checkpoint.relay_id))
+        );
+        if (!checks.authorized_relay_valid) errors.push("TSL_RELAY_NOT_AUTHORIZED");
       }
     }
   }
@@ -876,7 +959,7 @@ export async function verifyTSL(
       input.proof.epoch_start_ms === input.checkpoint.epoch_start_ms &&
       input.proof.epoch_duration_ms === input.checkpoint.epoch_duration_ms &&
       input.proof.shard === input.checkpoint.shard &&
-      input.proof.checkpoint_hash === checkpointHash(input.checkpoint) &&
+      input.proof.checkpoint_hash === checkpointHashForPolicy(input.checkpoint) &&
       checkpointRootForKind(input.checkpoint, input.proof.tree_kind) === input.proof.root;
     if (checks.checkpoint_matches_proof) explanation.push("Checkpoint root matches inclusion proof");
   }
@@ -953,8 +1036,10 @@ export async function verifyTSL(
     checks.provider_governance_valid !== false &&
     checks.seed_governance_valid !== false &&
     checks.full_covariance_drift_valid !== false &&
+    checks.authorized_relay_valid !== false &&
     checks.governance_policy_valid !== false &&
     checks.audit_consistency_valid !== false &&
+    !errors.includes("TSL_UNSAFE_FIXTURE_POLICY_ENABLED") &&
     (!policy.require_chain_revocation || checks.chain_revocation_checked === true) &&
     (!policy.require_zk_claims?.length || checks.zk_valid === true) &&
     (!policy.require_agent_scope || checks.agent_scope_valid === true) &&
@@ -965,6 +1050,8 @@ export async function verifyTSL(
     (!policy.require_provider_governance_active || checks.provider_governance_valid === true) &&
     (!policy.require_seed_governance_opening || checks.seed_governance_valid === true) &&
     (!policy.require_full_covariance_drift || checks.full_covariance_drift_valid === true) &&
+    (!policy.require_authorized_relay || checks.authorized_relay_valid === true) &&
+    (!policy.require_receipt_inclusion_for_disclosed_receipts || !input.receipts?.length || checks.receipt_included === true) &&
     (!policy.require_governance_policy || checks.governance_policy_valid === true) &&
     (!policy.require_audit_consistency || checks.audit_consistency_valid === true) &&
     (!policy.require_v2_assessment || checks.trust_assessment_v2_valid === true) &&

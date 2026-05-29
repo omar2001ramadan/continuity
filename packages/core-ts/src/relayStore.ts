@@ -165,7 +165,7 @@ export class InMemoryRelayStore {
       revocation_root: ZERO_HASH,
       event_count: commitments.length,
       receipt_count: 0,
-      previous_checkpoint: ZERO_HASH,
+      previous_checkpoint: this.previousCheckpointHash(epoch_start_ms, shard),
       relay_id: this.relay_id,
       relay_signature: "0x00"
     };
@@ -204,6 +204,13 @@ export class InMemoryRelayStore {
   identities(): IdentityDocumentV1[] {
     return this.relay_identity ? [structuredClone(this.relay_identity)] : [];
   }
+
+  private previousCheckpointHash(epoch_start_ms: number, shard: string): Hex32 {
+    const previous = [...this.settledCheckpoints.values()]
+      .filter((checkpoint) => checkpoint.shard === shard && checkpoint.epoch_start_ms < epoch_start_ms)
+      .sort((left, right) => right.epoch_start_ms - left.epoch_start_ms)[0];
+    return previous ? checkpointHash(previous) : ZERO_HASH;
+  }
 }
 
 function checkpointStoreKey(epoch_start_ms: number, shard: string): string {
@@ -215,6 +222,11 @@ export function shardForTrustID(trustId: TrustID): string {
 }
 
 export function checkpointHash(checkpoint: BatchCheckpointV1): Hex32 {
+  const payload = withoutField(checkpoint as unknown as Record<string, unknown>, "relay_signature");
+  return hashDomain(DOMAIN_TAGS.CHECKPOINT_V1, new TextEncoder().encode(canonicalize(payload)));
+}
+
+export function legacyCheckpointHashV0(checkpoint: BatchCheckpointV1): Hex32 {
   let payload = withoutField(checkpoint as unknown as Record<string, unknown>, "relay_signature");
   payload = withoutField(payload, "settlement_backend");
   payload = withoutField(payload, "settlement_tx");

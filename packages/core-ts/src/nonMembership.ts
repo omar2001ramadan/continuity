@@ -231,6 +231,8 @@ export function verifySparseMerkleProof(proof: SetNonMembershipProofV1, root: He
   if (proof.root && proof.root !== root) return false;
   if (proof.set_root !== root) return false;
   if (proof.leaf_index === undefined || !proof.sibling_path || proof.sibling_path.length !== profile.tree_depth) return false;
+  const expectedLeafIndex = sparseMerkleIndex(proof.value_commitment, profile.tree_depth);
+  if (proof.leaf_index !== expectedLeafIndex) return false;
   const expectedIndexCommitment = sparseHash("leaf-index", { tree_id: profile.tree_id, index: proof.leaf_index });
   if (proof.leaf_index_commitment !== expectedIndexCommitment) return false;
   const zeroes = sparseMerkleZeroHashes(profile.tree_depth);

@@ -22,8 +22,46 @@ import {
 	  type IdentityDocumentV1,
 	  type ScoringProfileV2,
 	  type TrustAssessmentUnsignedV1,
-  type VerifyTSLInput
-	} from "../../../packages/core-ts/src/index";
+	  type VerifyTSLInput
+		} from "../../../packages/core-ts/src/index";
+
+function objectHash(object: unknown): string {
+  return sha256Hex(canonicalBytes(object));
+}
+
+function schemaValidOrErrors(schemaKey: Parameters<typeof validateSchema>[0], object: unknown): string[] {
+  const validation = validateSchema(schemaKey, object);
+  return validation.valid ? [] : validation.errors;
+}
+
+function normalizeFeaturesFromProfiles(input: {
+  featureRegistry: { feature_ids: string[] };
+  normalizationProfile: { feature_ranges_bps: Record<string, { min_bps: number; max_bps: number; missing_bps: number }> };
+  weightProfile: { weights_bps: Record<string, number> };
+  rawFeatures: Record<string, number | undefined>;
+}): { normalized: Record<string, number>; weights: Record<string, number>; errors: string[] } {
+  const normalized: Record<string, number> = {};
+  const weights: Record<string, number> = {};
+  const errors: string[] = [];
+  for (const featureId of [...input.featureRegistry.feature_ids].sort()) {
+    const range = input.normalizationProfile.feature_ranges_bps[featureId];
+    const weight = input.weightProfile.weights_bps[featureId];
+    if (!range) {
+      errors.push(`TSL_NORMALIZATION_RANGE_MISSING:${featureId}`);
+      continue;
+    }
+    if (typeof weight !== "number") {
+      errors.push(`TSL_WEIGHT_MISSING:${featureId}`);
+      continue;
+    }
+    const raw = input.rawFeatures[featureId];
+    const value = typeof raw === "number" ? raw : range.missing_bps;
+    const span = Math.max(1, range.max_bps - range.min_bps);
+    normalized[featureId] = Math.max(0, Math.min(10000, Math.floor(((value - range.min_bps) * 10000) / span)));
+    weights[featureId] = Math.max(0, Math.min(10000, Math.trunc(weight)));
+  }
+  return { normalized, weights, errors };
+}
 
 export function createScoringProvider() {
   const repo = createPostgresRepositoryFromEnv();
@@ -246,6 +284,32 @@ export function createScoringProvider() {
       if (!allowCallerFeatures) {
         const governance = req.body.provider_governance_status;
         const governanceValidation = governance ? validateSchema("providerGovernanceStatusV1", governance) : { valid: false, errors: [] };
+        const scoringProfile = req.body.scoring_profile;
+        const featureRegistry = req.body.feature_registry;
+        const normalizationProfile = req.body.normalization_profile;
+        const weightProfile = req.body.weight_profile;
+        const calibrationProfile = req.body.calibration_profile;
+        const confidenceProfile = req.body.confidence_profile;
+        const profileErrors = [
+          ...schemaValidOrErrors("scoringProfileV2", scoringProfile),
+          ...schemaValidOrErrors("featureRegistryV1", featureRegistry),
+          ...schemaValidOrErrors("normalizationProfileV1", normalizationProfile),
+          ...schemaValidOrErrors("weightProfileV1", weightProfile),
+          ...schemaValidOrErrors("calibrationProfileV1", calibrationProfile),
+          ...schemaValidOrErrors("confidenceProfileV1", confidenceProfile)
+        ];
+        const profileCommitmentsValid =
+          scoringProfile &&
+          featureRegistry &&
+          normalizationProfile &&
+          weightProfile &&
+          calibrationProfile &&
+          confidenceProfile &&
+          scoringProfile.provider === issuer &&
+          scoringProfile.feature_registry_commitment === objectHash(featureRegistry) &&
+          scoringProfile.normalization_profile_commitment === objectHash(normalizationProfile) &&
+          scoringProfile.weight_profile_commitment === objectHash(weightProfile) &&
+          scoringProfile.calibration_profile_commitment === objectHash(calibrationProfile);
         if (
           !governance ||
           !governanceValidation.valid ||
@@ -264,14 +328,14 @@ export function createScoringProvider() {
           });
           return;
         }
-        if (req.body.scoring_profile?.calibration_profile && req.body.scoring_profile?.calibration_profile_commitment) {
-          const calibrationHash = sha256Hex(canonicalBytes(req.body.scoring_profile.calibration_profile));
-          if (calibrationHash !== req.body.scoring_profile.calibration_profile_commitment) {
-            res.status(400).json({
-              error: { code: "TSL_CALIBRATION_PROFILE_COMMITMENT_MISMATCH", message: "Calibration profile does not match scoring profile commitment" }
-            });
-            return;
-          }
+        if (profileErrors.length || !profileCommitmentsValid) {
+          res.status(400).json({
+            error: {
+              code: "TSL_PROFILE_DERIVED_SCORING_REQUIRED",
+              message: `Production scoring requires profile sub-artifacts whose commitments match scoring_profile.v2${profileErrors.length ? `: ${profileErrors.join("; ")}` : ""}`
+            }
+          });
+          return;
         }
       }
       const receiptCounterparties = new Set((verifyInput.receipts ?? []).map((receipt) => receipt.receiver));
@@ -288,39 +352,49 @@ export function createScoringProvider() {
           recent_revocation_count: Number(req.body.recent_revocation_count ?? 0),
           computed_at: now.toISOString()
         });
+      const rawFeatureValues = {
+        crypto_validity: verification.checks.signature_valid && verification.checks.key_active && verification.checks.not_revoked ? 10000 : 0,
+        evidence_coverage: evidenceCoverage.coverage_bps,
+        reciprocity: Number(req.body.graph_feature_vector?.reciprocity_bps ?? 0),
+        receipt_quality: Math.min(10000, evidenceCoverage.valid_receipt_count * 1000),
+        attestation_quality: Math.min(10000, evidenceCoverage.attestation_count * 2000),
+        temporal_consistency: Number(
+          req.body.drift_report?.drift_label === "stable"
+            ? 10000
+            : req.body.drift_report
+              ? Math.max(0, 10000 - Number(req.body.drift_report.drift_score_bps ?? 0))
+              : 5000
+        ),
+        sybil_resistance: req.body.sybil_assessment ? Math.max(0, 10000 - Number(req.body.sybil_assessment.risk_score_bps ?? 0)) : undefined
+      };
+      const derivedProfileFeatures =
+        !allowCallerFeatures
+          ? normalizeFeaturesFromProfiles({
+              featureRegistry: req.body.feature_registry,
+              normalizationProfile: req.body.normalization_profile,
+              weightProfile: req.body.weight_profile,
+              rawFeatures: rawFeatureValues
+            })
+          : undefined;
+      if (derivedProfileFeatures?.errors.length) {
+        res.status(400).json({
+          error: { code: "TSL_PROFILE_DERIVED_SCORING_REQUIRED", message: derivedProfileFeatures.errors.join("; ") }
+        });
+        return;
+      }
       const normalizedFeatures =
         allowCallerFeatures && req.body.normalized_features_bps
           ? req.body.normalized_features_bps
-          : {
-              crypto_validity: verification.checks.signature_valid && verification.checks.key_active && verification.checks.not_revoked ? 10000 : 0,
-              evidence_coverage: evidenceCoverage.coverage_bps,
-              reciprocity: Number(req.body.graph_feature_vector?.reciprocity_bps ?? req.body.reciprocity_bps ?? 0),
-              receipt_quality: Math.min(10000, evidenceCoverage.valid_receipt_count * 1000),
-              attestation_quality: Math.min(10000, evidenceCoverage.attestation_count * 2000),
-              temporal_consistency: Number(
-                req.body.drift_report?.drift_label === "stable"
-                  ? 10000
-                  : req.body.drift_report
-                    ? Math.max(0, 10000 - Number(req.body.drift_report.drift_score_bps ?? 0))
-                    : 5000
-              )
-            };
+          : derivedProfileFeatures!.normalized;
       const weights =
         allowCallerFeatures && req.body.weights_bps
           ? req.body.weights_bps
-          : {
-              crypto_validity: 2500,
-              evidence_coverage: 2500,
-              reciprocity: 1500,
-              receipt_quality: 1500,
-              attestation_quality: 1000,
-              temporal_consistency: 1000
-            };
+          : derivedProfileFeatures!.weights;
       const unsigned = computeReferenceScoreV0({
         subject,
         issuer,
-        scoring_profile_id: String(req.body.scoring_profile_id ?? "did:tsl:provider:local/profile/reference-rc4"),
-        model_version: String(req.body.model_version ?? "reference-rc4.0.0"),
+        scoring_profile_id: String(req.body.scoring_profile?.profile_id ?? req.body.scoring_profile_id ?? "did:tsl:provider:local/profile/reference-rc4"),
+        model_version: String(req.body.scoring_profile?.model_version ?? req.body.model_version ?? "reference-rc4.0.0"),
         gate_result: {
           schema_valid: verification.checks.schema_valid,
           canonicalization_valid: verification.checks.schema_valid,
@@ -335,8 +409,8 @@ export function createScoringProvider() {
         evidence_coverage: evidenceCoverage,
         normalized_features_bps: normalizedFeatures,
         weights_bps: weights,
-        calibration_profile: req.body.scoring_profile?.calibration_profile,
-        confidence_profile: req.body.scoring_profile?.confidence_profile,
+        calibration_profile: allowCallerFeatures ? req.body.scoring_profile?.calibration_profile : req.body.calibration_profile,
+        confidence_profile: allowCallerFeatures ? req.body.scoring_profile?.confidence_profile : req.body.confidence_profile,
         has_adverse_evidence: Boolean(
             req.body.has_adverse_evidence === true || req.body.sybil_assessment?.risk_label === "high" || req.body.drift_report?.drift_label === "severe"
           ),

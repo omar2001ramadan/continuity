@@ -172,6 +172,10 @@ components:
           $ref: '../json-schema/event_commitment.v1.schema.json'
         proof:
           $ref: '../json-schema/inclusion_proof.v1.schema.json'
+        receipt_proofs:
+          type: array
+          items:
+            $ref: '../json-schema/inclusion_proof.v1.schema.json'
         checkpoint:
           $ref: '../json-schema/batch_checkpoint.v1.schema.json'
         delegation_policies:

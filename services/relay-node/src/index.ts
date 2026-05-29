@@ -418,6 +418,7 @@ export function createRelayNode() {
         {
           envelope: req.body.envelope,
           proof: req.body.proof,
+          receipt_proofs: req.body.receipt_proofs,
           checkpoint: req.body.checkpoint,
           message_disclosure: req.body.message_disclosure,
           receipts: req.body.receipts,
@@ -480,6 +481,7 @@ export function createRelayNode() {
         {
           envelope: req.body.envelope,
           proof: req.body.proof,
+          receipt_proofs: req.body.receipt_proofs,
           checkpoint: req.body.checkpoint,
           delegations: req.body.delegations,
           delegation_policies: req.body.delegation_policies,
@@ -493,7 +495,17 @@ export function createRelayNode() {
         },
         settlementBackend ?? undefined
       );
-      res.status(result.checks.delegated_action_valid || result.checks.agent_scope_valid ? 200 : 422).json(result);
+      const inside = result.checks.delegated_action_valid === true || result.checks.agent_scope_valid === true;
+      if (inside) {
+        res.json({ status: "agent_inside_scope", result });
+        return;
+      }
+      res.status(422).json({
+        error: {
+          code: result.errors[0] ?? "TSL_DELEGATED_ACTION_INVALID",
+          message: result.errors.length ? result.errors.join("; ") : "Delegated action is outside scope"
+        }
+      });
     } catch (error) {
       sendRelayError(res, error);
     }
