@@ -458,7 +458,7 @@ mod tests {
 
         let zk_manifest = json!({
             "type": "tsl.zk.circuit_release_manifest.v1",
-            "circuit_id": "identity-age-threshold-v1",
+            "circuit_id": "identity-age-threshold-prod-interface-v1",
             "claim": "identity_age_days",
             "version": "1.0.0",
             "circuit_hash": COMMITMENT_HASH_HEX,
@@ -467,10 +467,10 @@ mod tests {
             "zkey_hash": COMMITMENT_HASH_HEX,
             "verification_key_id": "identity-age-vkey-v1",
             "verification_key_hash": COMMITMENT_HASH_HEX,
-            "public_signal_schema": {"fields": ["subject_hash", "threshold"]},
-            "private_witness_schema": {"fields": ["creation_epoch_day", "registry_path"]},
-            "soundness_bits": 80,
-            "privacy_notes": ["test manifest with registered verification key"],
+            "public_signal_schema": {"fields": ["subject_hash", "threshold", "registry_root"]},
+            "private_witness_schema": {"fields": ["creation_epoch_day", "current_epoch_day", "registry_path", "public_registry_root"]},
+            "soundness_bits": 128,
+            "privacy_notes": ["production interface manifest; audited circuit release required before mainnet"],
             "ceremony_transcript_hash": COMMITMENT_HASH_HEX,
             "auditor": "did:tsl:auditor:test",
             "reviewer": "did:tsl:reviewer:test",

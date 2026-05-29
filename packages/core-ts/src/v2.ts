@@ -77,6 +77,13 @@ function bps(part: number, total: number): number {
   return clampBps(Math.floor((part * 10000) / total));
 }
 
+function medianNumber(values: number[]): number {
+  const sorted = [...values].filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : Math.floor((sorted[middle - 1] + sorted[middle]) / 2);
+}
+
 function averageSignalBps(signal: object | undefined): number {
   const values = Object.values(signal ?? {}).filter((value): value is number => typeof value === "number").map(clampBps);
   if (!values.length) return 0;
@@ -476,6 +483,7 @@ export interface GraphEdgeV0 {
   community?: string;
   issuer?: TrustID;
   created_at?: RFC3339;
+  evidence_hash?: Hex32;
   evidence_commitment?: Hex32;
   appeal_uri?: string;
   appeal_status?: string;
@@ -634,7 +642,8 @@ export async function constructGraphFromEvidenceV0(input: {
       type: "signed_event",
       timestamp: event.timestamp,
       weight_bps: graphBaseWeightBps(input.graph_profile, "signed_event"),
-      decay_bps: graphDecayBps(input.graph_profile, "signed_event", event.timestamp, input.at_time)
+      decay_bps: graphDecayBps(input.graph_profile, "signed_event", event.timestamp, input.at_time),
+      evidence_hash: eventHash(event)
     });
   }
 
@@ -662,6 +671,7 @@ export async function constructGraphFromEvidenceV0(input: {
           ? negativeGraphDecayBps(input.graph_profile, receipt.timestamp, input.at_time)
           : graphDecayBps(input.graph_profile, receipt.receipt_class, receipt.timestamp, input.at_time),
       receipt_status_bps: receipt.receipt_class === "disputed" ? 5000 : 10000,
+      evidence_hash: receiptHash(receipt),
       ...(dispute?.evidence_commitment ?? receipt.metadata_commitment ? { evidence_commitment: dispute?.evidence_commitment ?? receipt.metadata_commitment } : {}),
       ...(dispute?.appeal_uri ? { appeal_uri: dispute.appeal_uri } : {}),
       ...(dispute?.appeal_status ? { appeal_status: dispute.appeal_status } : {}),
@@ -695,6 +705,7 @@ export async function constructGraphFromEvidenceV0(input: {
           ? negativeGraphDecayBps(input.graph_profile, attestation.issued_at, input.at_time)
           : graphDecayBps(input.graph_profile, "attestation", attestation.issued_at, input.at_time),
       issuer: attestation.issuer,
+      evidence_hash: attestationHash(attestation),
       evidence_commitment: attestation.claim_commitment
     };
     const allowed = negativeEvidenceAllowed(edge, input.graph_profile);
@@ -735,6 +746,8 @@ export async function constructGraphFromEvidenceV0(input: {
             : attestation.appeal_status === "submitted" || attestation.appeal_status === "escalated"
               ? 7500
               : 10000
+      ,
+      evidence_hash: attestationV2Hash(attestation)
     };
     const allowed = negativeEvidenceAllowed(edge, input.graph_profile);
     if (!allowed && strictNegativeEvidence) throw new Error("TSL_NEGATIVE_EVIDENCE_INCOMPLETE");
@@ -758,7 +771,8 @@ export async function constructGraphFromEvidenceV0(input: {
       type: "delegation",
       timestamp: policy.valid_from,
       weight_bps: graphBaseWeightBps(input.graph_profile, "delegation"),
-      decay_bps: 10000
+      decay_bps: 10000,
+      evidence_hash: delegationPolicyV2Hash(policy)
     });
   }
 
@@ -792,6 +806,7 @@ function effectiveWeight(edge: GraphEdgeV0, graphProfile?: GraphProfileV2): numb
     if (multiplier !== undefined) value = Math.floor((value * clampBps(multiplier)) / 10000);
   }
   if (graphProfile && isNegativeGraphEdge(edge)) {
+    if (graphProfile.community_detection.negative_edge_treatment === "ignore") return 0;
     value = Math.min(value, clampBps(graphProfile.negative_edge_policy.max_single_negative_weight_bps));
   }
   return Math.max(0, value);
@@ -799,6 +814,7 @@ function effectiveWeight(edge: GraphEdgeV0, graphProfile?: GraphProfileV2): numb
 
 function signedEffectiveWeight(edge: GraphEdgeV0, graphProfile?: GraphProfileV2): number {
   const weight = effectiveWeight(edge, graphProfile);
+  if (graphProfile?.community_detection.negative_edge_treatment === "ignore") return 0;
   return isNegativeGraphEdge(edge) ? -weight : weight;
 }
 
@@ -1299,6 +1315,10 @@ export function graphFeatureVectorV1Hash(vector: GraphFeatureVectorUnsignedV1 | 
   return hashSignedObject(V2_DOMAIN_TAGS.GRAPH_FEATURE_VECTOR_V1, vector as unknown as Record<string, unknown>);
 }
 
+export function signGraphFeatureVectorV1(vector: GraphFeatureVectorUnsignedV1, seedHex: string): GraphFeatureVectorV1 {
+  return { ...vector, signature: signEd25519(graphFeatureVectorV1Hash(vector), seedHex) };
+}
+
 export function computeSybilAssessmentV0(input: {
   subject: TrustID;
   issuer?: TrustID;
@@ -1426,13 +1446,15 @@ export function computeSybilAssessmentV0(input: {
     else pair.reverse += Math.max(0, signedEffectiveWeight(edge, input.graph_profile));
     receiptPairs.set(key, pair);
   }
-  const receiptSymmetryNumerator = [...receiptPairs.values()].reduce((sum, pair) => sum + 2 * Math.min(pair.forward, pair.reverse), 0);
-  const receiptSymmetryDenominator = [...receiptPairs.values()].reduce((sum, pair) => sum + pair.forward + pair.reverse, 0);
+  const receiptSymmetryNumerator = [...receiptPairs.values()].reduce((sum, pair) => sum + Math.min(pair.forward, pair.reverse), 0);
+  const receiptSymmetryDenominator = [...receiptPairs.values()].reduce((sum, pair) => sum + Math.max(pair.forward, pair.reverse), 0);
   const createdTimes = internalEdges.map((edge) => Date.parse(edge.created_at ?? edge.timestamp)).filter(Number.isFinite);
+  const creationMedian = createdTimes.length ? medianNumber(createdTimes) : 0;
+  const creationMad = createdTimes.length ? Math.max(1, medianNumber(createdTimes.map((time) => Math.abs(time - creationMedian)))) : 0;
   const creationSync =
     createdTimes.length < 2
       ? 0
-      : clampBps(10000 - bps(Math.max(...createdTimes) - Math.min(...createdTimes), 1000 * 60 * 60 * 24 * 30));
+      : clampBps(10000 - bps(creationMad, 1000 * 60 * 60 * 24 * 30));
   const issuers = internalEdges.map((edge) => edge.issuer).filter((issuer): issuer is TrustID => Boolean(issuer));
   const issuerReuse =
     issuers.length === 0
@@ -1587,6 +1609,10 @@ export function computeSybilAssessmentV0(input: {
 
 export function sybilAssessmentV1Hash(assessment: SybilAssessmentUnsignedV1 | SybilAssessmentV1): Hex32 {
   return hashSignedObject(V2_DOMAIN_TAGS.SYBIL_ASSESSMENT_V1, assessment as unknown as Record<string, unknown>);
+}
+
+export function signSybilAssessmentV1(assessment: SybilAssessmentUnsignedV1, seedHex: string): SybilAssessmentV1 {
+  return { ...assessment, signature: signEd25519(sybilAssessmentV1Hash(assessment), seedHex) };
 }
 
 function fixedPointSqrt(value: number): number {
@@ -1817,8 +1843,9 @@ export function computeDriftReportV0(input: {
 	  const mahaRisk = Math.min(10000, Math.floor((mahalanobis.score * 10000) / dcrit));
   const dormantPenalty = dormant ? clampBps(input.dormant_penalty_bps ?? 2500) : 0;
   const keyPenalty = Math.max(componentValues.find(([component]) => component === "key")?.[1] ?? 0, clampBps(input.key_penalty_bps ?? 0));
-  const drift = clampBps(Math.floor((mahaRisk * coverage) / 10000) + dormantPenalty + keyPenalty);
-  const severeAdverse = (input.adverse_evidence === true || historyAdverse) && drift >= 5000;
+  const baseDrift = clampBps(Math.floor((mahaRisk * coverage) / 10000) + dormantPenalty + keyPenalty);
+  const drift = dormant ? Math.max(8000, baseDrift) : baseDrift;
+  const severeAdverse = (input.adverse_evidence === true || historyAdverse) && drift >= 7500;
   const hardCompromise = componentScores.key !== undefined && componentScores.key >= 7500;
   const driftLabel = dormant
     ? "dormant_reactivation"
@@ -1832,7 +1859,7 @@ export function computeDriftReportV0(input: {
   const driftAction = dormant
     ? "step_up"
     : driftLabel === "severe"
-      ? (input.severe_action ?? "temporary_block")
+      ? (input.severe_action ?? "human_review")
       : driftLabel === "high"
         ? "step_up"
         : driftLabel === "moderate"
@@ -1871,6 +1898,10 @@ export function computeDriftReportV0(input: {
 
 export function driftReportV1Hash(report: DriftReportUnsignedV1 | DriftReportV1): Hex32 {
   return hashSignedObject(V2_DOMAIN_TAGS.DRIFT_REPORT_V1, report as unknown as Record<string, unknown>);
+}
+
+export function signDriftReportV1(report: DriftReportUnsignedV1, seedHex: string): DriftReportV1 {
+  return { ...report, signature: signEd25519(driftReportV1Hash(report), seedHex) };
 }
 
 function bucketizeMetadataV0(metadata: unknown): Record<string, unknown> {

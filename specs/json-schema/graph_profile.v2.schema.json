@@ -187,6 +187,19 @@
         "damping_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "personalization": { "enum": ["trusted_seeds", "subject", "uniform"] }
       }
+    },
+    "manifold_profile": {
+      "type": "object",
+      "required": ["algorithm"],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": { "enum": ["seed_distance_proxy_v1", "centroid_covariance_v1"] },
+        "trusted_centroid_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+        "adversarial_centroid_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+        "cluster_centroid_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+        "covariance_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+        "seed_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" }
+      }
     }
   }
 }

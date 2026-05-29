@@ -11,8 +11,13 @@
     "contract_checkpoint_fields_hash",
     "settlement_tx",
     "transaction_receipt_hash",
+    "block_hash",
+    "block_number",
     "receipt_status",
     "chain_proof_commitment",
+    "settlement_event_hash",
+    "settlement_event_index",
+    "receipt_proof_source_commitment",
     "submitter",
     "submitted_at",
     "status"
@@ -33,6 +38,9 @@
     "block_number": { "type": "integer", "minimum": 0 },
     "receipt_status": { "enum": ["success", "reverted", "unknown"] },
     "chain_proof_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "settlement_event_hash": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "settlement_event_index": { "type": "integer", "minimum": 0 },
+    "receipt_proof_source_commitment": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
     "submitter": { "type": "string", "minLength": 1 },
     "submitted_at": { "type": "string", "format": "date-time" },
     "status": { "enum": ["submitted", "settled", "failed"] }

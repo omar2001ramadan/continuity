@@ -833,7 +833,7 @@ export class PostgresRepository {
     return (result.rows[0]?.checkpoint_hash as Hex32 | undefined) ?? ZERO_HASH;
   }
 
-  async buildCheckpoint(epochStartMs: number, shard: string, epochDurationMs: number, relayId: string, relaySignature: string): Promise<BatchCheckpointV1> {
+  async buildCheckpoint(epochStartMs: number, shard: string, epochDurationMs: number, relayId: string, relaySignature: string, settlementBackend?: string): Promise<BatchCheckpointV1> {
     const closed = await this.pool.query("SELECT checkpoint_hash FROM checkpoints WHERE epoch_start_ms = $1 AND shard = $2 LIMIT 1", [epochStartMs, shard]);
     if (closed.rows.length > 0) {
       throw new Error("TSL_LOG_SEGMENT_CLOSED");
@@ -879,6 +879,7 @@ export class PostgresRepository {
       event_count: eventCommitments.length,
       receipt_count: receiptCommitments.length,
       previous_checkpoint: await this.previousCheckpointHash(epochStartMs, shard),
+      ...(settlementBackend ? { settlement_backend: settlementBackend } : {}),
       relay_id: relayId,
       relay_signature: relaySignature as `0x${string}`
     };
@@ -913,11 +914,16 @@ export class PostgresRepository {
   }
 
   async markCheckpointSettled(checkpoint: BatchCheckpointV1): Promise<void> {
+    const existing = await this.getCheckpoint(checkpoint.epoch_start_ms, checkpoint.shard);
+    if (!existing) throw new Error("TSL_CHECKPOINT_MISSING");
+    if (checkpointHash(existing) !== checkpointHash({ ...checkpoint, settlement_tx: undefined })) {
+      throw new Error("TSL_CHECKPOINT_IDENTITY_MISMATCH");
+    }
     await this.pool.query(
       `UPDATE checkpoints
-       SET settlement_backend = $3, settlement_tx = $4, settlement_status = 'settled', settled_at = now()
+       SET settlement_tx = $3, settlement_status = 'settled', settled_at = now()
        WHERE epoch_start_ms = $1 AND shard = $2`,
-      [checkpoint.epoch_start_ms, checkpoint.shard, checkpoint.settlement_backend ?? null, checkpoint.settlement_tx ?? null]
+      [checkpoint.epoch_start_ms, checkpoint.shard, checkpoint.settlement_tx ?? null]
     );
   }
 }

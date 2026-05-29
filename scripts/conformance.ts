@@ -667,6 +667,13 @@ async function checkSemanticConformance(): Promise<void> {
   assert(extractedFeatures.identity_age !== undefined && extractedFeatures.identity_age > 0, "Scoring feature extractor must compute exponential identity age");
   assert(extractedFeatures.receipt_count !== undefined && extractedFeatures.receipt_count > 0, "Scoring feature extractor must compute clustered receipt counts");
   assert(extractedFeatures.local_relationship === undefined, "Local relationship must remain local unless explicitly disclosed");
+  const scoringProviderSource = fs.readFileSync(path.join(root, "services/scoring-provider/src/index.ts"), "utf8");
+  assert(
+    !scoringProviderSource.includes("graph_feature_vector: req.body.graph_feature_vector") &&
+      !scoringProviderSource.includes("sybil_assessment: req.body.sybil_assessment") &&
+      !scoringProviderSource.includes("drift_report: req.body.drift_report"),
+    "Scoring provider must not extract features directly from request-body graph/Sybil/drift artifacts"
+  );
 
   const aSeed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
   const bSeed = "0101010101010101010101010101010101010101010101010101010101010101";
@@ -726,6 +733,7 @@ async function checkSemanticConformance(): Promise<void> {
     }
   });
   assert(graph.edges.length === 3, "Graph conformance must be evidence-derived from verified events/receipts");
+  assert(graph.edges.every((edge) => edge.evidence_hash), "Graph edges must carry canonical source evidence_hash values");
   const vector = computeGraphFeatureVectorV0({
     subject: "did:tsl:a",
     graph,

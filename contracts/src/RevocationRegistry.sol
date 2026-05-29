@@ -24,6 +24,7 @@ contract RevocationRegistry {
     mapping(address => bool) public authorizedSubmitters;
     mapping(bytes32 => Revocation) public revocationsByHash;
     mapping(bytes32 => mapping(bytes32 => bytes32)) public latestRevocationByTrustIdKey;
+    mapping(bytes32 => mapping(bytes32 => bytes32[])) private revocationHistoryByTrustIdKey;
 
     event TrustIDRegistryUpdated(address indexed registry);
     event SubmitterAuthorizationUpdated(address indexed submitter, bool authorized);
@@ -87,9 +88,11 @@ contract RevocationRegistry {
     }
 
     function isRevoked(bytes32 trustId, bytes32 key, uint64 atTime) external view returns (bool) {
-        bytes32 revocationHash = latestRevocationByTrustIdKey[trustId][key];
-        if (revocationHash == bytes32(0)) return false;
-        return revocationsByHash[revocationHash].effectiveAt <= atTime;
+        bytes32[] storage history = revocationHistoryByTrustIdKey[trustId][key];
+        for (uint256 i = 0; i < history.length; i++) {
+            if (revocationsByHash[history[i]].effectiveAt <= atTime) return true;
+        }
+        return false;
     }
 
     function revocationAuthorizationHash(
@@ -136,6 +139,7 @@ contract RevocationRegistry {
             submitter: msg.sender
         });
         latestRevocationByTrustIdKey[trustId][key] = revocationHash;
+        revocationHistoryByTrustIdKey[trustId][key].push(revocationHash);
         emit RevocationRecorded(revocationHash, trustId, key, reason, effectiveAt);
     }
 

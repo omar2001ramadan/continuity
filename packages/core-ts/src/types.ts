@@ -178,6 +178,9 @@ export interface SettlementEvidenceV1 {
   block_number?: number;
   receipt_status?: "success" | "reverted" | "unknown";
   chain_proof_commitment?: Hex32;
+  settlement_event_hash?: Hex32;
+  settlement_event_index?: number;
+  receipt_proof_source_commitment?: Hex32;
   submitter: string;
   submitted_at: RFC3339;
   status: "submitted" | "settled" | "failed";
@@ -410,6 +413,14 @@ export interface GraphProfileV2 {
     iterations: number;
     damping_bps: number;
     personalization?: "trusted_seeds" | "subject" | "uniform";
+  };
+  manifold_profile?: {
+    algorithm: "seed_distance_proxy_v1" | "centroid_covariance_v1";
+    trusted_centroid_commitment?: Hex32;
+    adversarial_centroid_commitment?: Hex32;
+    cluster_centroid_commitment?: Hex32;
+    covariance_commitment?: Hex32;
+    seed_commitment?: Hex32;
   };
 }
 

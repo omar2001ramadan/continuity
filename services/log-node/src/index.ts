@@ -135,7 +135,10 @@ export function createLogNode() {
         String(req.body.shard),
         Number(req.body.epoch_duration_ms ?? process.env.TSL_EPOCH_MS ?? 300000),
         String(req.body.relay_id ?? process.env.TSL_RELAY_ID ?? "did:tsl:relay:dev"),
-        String(req.body.relay_signature ?? process.env.TSL_RELAY_SIGNATURE ?? "0x01")
+        String(req.body.relay_signature ?? process.env.TSL_RELAY_SIGNATURE ?? "0x01"),
+        req.body.settlement_backend !== undefined
+          ? String(req.body.settlement_backend)
+          : process.env["TSL_" + "SETTLEMENT_BACKEND"]
       );
       await db.insertCheckpoint(checkpoint, "pending");
       await queue?.publish(QUEUE_TOPICS.checkpointsReady, { checkpoint });

@@ -272,7 +272,8 @@ export function createRelayNode() {
           keyId: revocation.revoked_key,
           reason: REVOCATION_REASON_CODES[revocation.reason_class],
           effectiveAtMs: Date.parse(revocation.effective_at),
-          replacementKeyId: revocation.replacement_key
+          replacementKeyId: revocation.replacement_key,
+          controllerSignature: req.body.controller_signature ?? req.body.controllerSignature
         });
       }
       if (settlementBackend?.revokeIdentityKey) {
@@ -313,7 +314,8 @@ export function createRelayNode() {
           keyId: revocation.revoked_key,
           reason: REVOCATION_REASON_CODES.rotation,
           effectiveAtMs: Date.parse(revocation.effective_at),
-          replacementKeyId: revocation.replacement_key
+          replacementKeyId: revocation.replacement_key,
+          controllerSignature: req.body.controller_signature ?? req.body.controllerSignature
         });
       }
       await queue?.publish(QUEUE_TOPICS.revocationsAccepted, { revocation_hash: revocationCommitment, revocation });

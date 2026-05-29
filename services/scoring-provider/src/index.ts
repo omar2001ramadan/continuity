@@ -57,6 +57,26 @@ function signedByIdentity(input: {
   return Boolean(key && input.signature && verifyEd25519(key.public_key, input.hash as `0x${string}`, input.signature as `0x${string}`));
 }
 
+function scoringVerificationArtifacts(source: Record<string, unknown> | undefined): Partial<VerifyTSLInput> {
+  if (!source) return {};
+  return {
+    ...(source.graph_profile ? { graph_profile: source.graph_profile as VerifyTSLInput["graph_profile"] } : {}),
+    ...(source.graph_feature_vector ? { graph_feature_vector: source.graph_feature_vector as VerifyTSLInput["graph_feature_vector"] } : {}),
+    ...(source.trusted_seeds ? { trusted_seeds: source.trusted_seeds as VerifyTSLInput["trusted_seeds"] } : {}),
+    ...(source.adversarial_seeds ? { adversarial_seeds: source.adversarial_seeds as VerifyTSLInput["adversarial_seeds"] } : {}),
+    ...(source.trusted_seed_governance ? { trusted_seed_governance: source.trusted_seed_governance as VerifyTSLInput["trusted_seed_governance"] } : {}),
+    ...(source.adversarial_seed_governance ? { adversarial_seed_governance: source.adversarial_seed_governance as VerifyTSLInput["adversarial_seed_governance"] } : {}),
+    ...(source.event_receivers ? { event_receivers: source.event_receivers as VerifyTSLInput["event_receivers"] } : {}),
+    ...(source.receipt_disputes ? { receipt_disputes: source.receipt_disputes as VerifyTSLInput["receipt_disputes"] } : {}),
+    ...(source.attestations_v2 ? { attestations_v2: source.attestations_v2 as VerifyTSLInput["attestations_v2"] } : {}),
+    ...(source.sybil_assessment ? { sybil_assessment: source.sybil_assessment as VerifyTSLInput["sybil_assessment"] } : {}),
+    ...(source.sybil_profile ? { sybil_profile: source.sybil_profile as VerifyTSLInput["sybil_profile"] } : {}),
+    ...(source.drift_report ? { drift_report: source.drift_report as VerifyTSLInput["drift_report"] } : {}),
+    ...(source.drift_feature_history ? { drift_feature_history: source.drift_feature_history as VerifyTSLInput["drift_feature_history"] } : {}),
+    ...(source.drift_cohort_baseline_components ? { drift_cohort_baseline_components: source.drift_cohort_baseline_components as VerifyTSLInput["drift_cohort_baseline_components"] } : {})
+  };
+}
+
 function normalizeFeaturesFromProfiles(input: {
   featureRegistry: { feature_ids: string[] };
   normalizationProfile: { feature_ranges_bps: Record<string, { min_bps: number; max_bps: number; missing_bps: number }> };
@@ -317,6 +337,8 @@ export function createScoringProvider() {
       }
 	      const now = new Date();
       const bundle = req.body.proof_bundle ?? req.body.bundle;
+      const scoringArtifacts = scoringVerificationArtifacts(req.body);
+      const bundledScoringArtifacts = scoringVerificationArtifacts(bundle);
       const verifyInput: VerifyTSLInput | null = bundle
         ? {
             proof_bundle: bundle,
@@ -332,7 +354,9 @@ export function createScoringProvider() {
             delegation_policies: bundle.delegations,
             agent_actions: bundle.agent_actions,
             message_disclosure: bundle.message_disclosure,
-            disclosure_consents: bundle.disclosure_consents
+            disclosure_consents: bundle.disclosure_consents,
+            ...bundledScoringArtifacts,
+            ...scoringArtifacts
           }
         : req.body.envelope
           ? {
@@ -347,7 +371,8 @@ export function createScoringProvider() {
               delegation_policies: req.body.delegation_policies,
               agent_actions: req.body.agent_actions,
               message_disclosure: req.body.message_disclosure,
-              disclosure_consents: req.body.disclosure_consents
+              disclosure_consents: req.body.disclosure_consents,
+              ...scoringArtifacts
             }
           : null;
       if (!verifyInput?.envelope) {
@@ -387,12 +412,31 @@ export function createScoringProvider() {
         };
       const subject = String(req.body.subject ?? verifyInput.envelope.sender);
       const issuer = String(req.body.issuer ?? process.env.TSL_SCORING_PROVIDER_ID ?? "did:tsl:provider:local");
+      const requestedGraphArtifact = Boolean(req.body.graph_feature_vector || req.body.sybil_assessment || req.body.drift_report || bundle?.graph_feature_vector || bundle?.sybil_assessment || bundle?.drift_report);
+      if (
+        requestedGraphArtifact &&
+        (!verifyInput.graph_feature_vector && !verifyInput.sybil_assessment && !verifyInput.drift_report)
+      ) {
+        res.status(422).json({
+          error: {
+            code: "TSL_SCORING_EVIDENCE_VERIFICATION_FAILED",
+            message: "Graph, Sybil, and drift artifacts supplied to scoring must be present inside the same verifyTSL input used for evidence verification"
+          }
+        });
+        return;
+      }
       const verification = await verifyTSL(verifyInput, resolver, {
         require_inclusion: true,
         require_checkpoint: true,
         require_settlement: domainPolicy.requires_settlement,
         verifier_or_provider: issuer,
-        disclosure_purpose: "scoring_assessment"
+        disclosure_purpose: "scoring_assessment",
+        require_graph_artifacts: requestedGraphArtifact,
+        require_sybil_provider_issuer: Boolean(verifyInput.sybil_assessment),
+        require_behavioral_sybil_tiers: true,
+        require_seed_governance_opening: Boolean(verifyInput.trusted_seed_governance || verifyInput.adversarial_seed_governance),
+        require_core_drift_formula: Boolean(verifyInput.drift_report),
+        require_full_covariance_drift: Boolean(verifyInput.drift_report)
       });
       if (!verification.verified) {
         const privateBoundaryErrors = new Set([
@@ -569,9 +613,9 @@ export function createScoringProvider() {
           receipts: verifyInput.receipts,
           attestations: verifyInput.attestations,
           attestations_v2: verifyInput.attestations_v2,
-          graph_feature_vector: req.body.graph_feature_vector,
-          sybil_assessment: req.body.sybil_assessment,
-          drift_report: req.body.drift_report,
+          graph_feature_vector: verifyInput.graph_feature_vector,
+          sybil_assessment: verifyInput.sybil_assessment,
+          drift_report: verifyInput.drift_report,
           verification_checks: verification.checks,
           valid_signed_event_count: verification.checks.signature_valid ? 1 : 0,
           clustered_receipt_count: new Set((verifyInput.receipts ?? []).map((receipt) => receipt.metadata_commitment ?? receipt.receiver)).size,
@@ -633,7 +677,7 @@ export function createScoringProvider() {
           ...(verifyInput.attestations_v2 ?? []).map((attestation) => sha256Hex(canonicalBytes(attestation)))
         ],
         has_adverse_evidence: Boolean(
-          req.body.has_adverse_evidence === true || req.body.sybil_assessment?.risk_label === "high" || req.body.drift_report?.drift_label === "severe"
+          req.body.has_adverse_evidence === true || verifyInput.sybil_assessment?.risk_label === "high" || verifyInput.drift_report?.drift_label === "severe"
         ),
         domain_policy: domainPolicy,
         issued_at: now.toISOString()

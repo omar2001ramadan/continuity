@@ -221,6 +221,23 @@ function checkpointRootForKind(checkpoint: BatchCheckpointV1, kind: string): str
   return undefined;
 }
 
+function settlementEventHash(evidence: NonNullable<VerifyTSLInput["settlement_evidence"]>[number]): Hex32 {
+  return sha256Hex(
+    canonicalBytes({
+      chain_id: evidence.chain_id,
+      contract_address: evidence.contract_address.toLowerCase(),
+      checkpoint_identity_hash: evidence.checkpoint_identity_hash,
+      contract_checkpoint_fields_hash: evidence.contract_checkpoint_fields_hash,
+      settlement_tx: evidence.settlement_tx.toLowerCase(),
+      transaction_receipt_hash: evidence.transaction_receipt_hash,
+      block_hash: evidence.block_hash,
+      block_number: evidence.block_number,
+      receipt_status: evidence.receipt_status,
+      submitter: evidence.submitter.toLowerCase()
+    })
+  );
+}
+
 function settlementEvidenceMatchesCheckpoint(input: VerifyTSLInput, checkpointHashValue: Hex32): boolean {
   if (!input.checkpoint || !input.settlement_evidence?.length) return false;
   const expectedFieldsHash = contractCheckpointFieldsHashForCheckpoint(input.checkpoint);
@@ -235,12 +252,20 @@ function settlementEvidenceMatchesCheckpoint(input: VerifyTSLInput, checkpointHa
       evidence.contract_checkpoint_fields_hash === expectedFieldsHash &&
       (evidence.contract_checkpoint_hash === undefined || evidence.contract_checkpoint_hash === expectedFieldsHash);
     const backendMatches = !expectedBackend || evidence.settlement_backend === expectedBackend;
+    const eventHash = evidence.settlement_event_hash ? settlementEventHash(evidence) : undefined;
+    const eventHashMatches = Boolean(eventHash && evidence.settlement_event_hash === eventHash);
+    const proofCommitmentMatches =
+      Boolean(evidence.receipt_proof_source_commitment) &&
+      evidence.chain_proof_commitment ===
+        sha256Hex(canonicalBytes({ settlement_event_hash: evidence.settlement_event_hash, receipt_proof_source_commitment: evidence.receipt_proof_source_commitment }));
     const receiptProofPresent =
       evidence.receipt_status === "success" &&
       Boolean(evidence.transaction_receipt_hash) &&
+      Boolean(evidence.block_hash) &&
+      evidence.block_number !== undefined &&
       Boolean(evidence.chain_proof_commitment) &&
       evidence.settlement_tx === evidence.transaction_receipt_hash;
-    return identityMatches && fieldsHashMatches && backendMatches && evidence.status === "settled" && receiptProofPresent;
+    return identityMatches && fieldsHashMatches && backendMatches && eventHashMatches && proofCommitmentMatches && evidence.status === "settled" && receiptProofPresent;
   });
 }
 
@@ -805,6 +830,23 @@ export async function verifyTSL(
       if (!manifoldFieldsPresent) {
         checks.graph_artifacts_valid = false;
         errors.push("TSL_MANIFOLD_PROFILE_UNSUPPORTED");
+      }
+      const manifoldProfile = input.graph_profile?.manifold_profile;
+      if (!manifoldProfile) {
+        checks.graph_artifacts_valid = false;
+        errors.push("TSL_MANIFOLD_PROFILE_UNSUPPORTED");
+      }
+      if (manifoldProfile?.algorithm === "centroid_covariance_v1") {
+        const commitmentsPresent = Boolean(
+          manifoldProfile.trusted_centroid_commitment &&
+            manifoldProfile.adversarial_centroid_commitment &&
+            manifoldProfile.cluster_centroid_commitment &&
+            manifoldProfile.covariance_commitment
+        );
+        if (!commitmentsPresent) {
+          checks.graph_artifacts_valid = false;
+          errors.push("TSL_MANIFOLD_PROFILE_UNSUPPORTED");
+        }
       }
     }
     if (policy.require_seed_governance_opening) {
