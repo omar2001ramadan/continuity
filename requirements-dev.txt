@@ -1,0 +1,2 @@
+jsonschema>=4.22,<5
+PyNaCl>=1.5,<2

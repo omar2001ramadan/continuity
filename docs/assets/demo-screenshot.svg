@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="620" viewBox="0 0 1120 620" role="img" aria-labelledby="title desc">
+  <title id="title">Continuity Protocol CLI demo screenshot</title>
+  <desc id="desc">A terminal-style screenshot showing npm run demo producing a verified proof bundle.</desc>
+  <rect width="1120" height="620" rx="18" fill="#111827"/>
+  <rect x="28" y="28" width="1064" height="564" rx="14" fill="#0b1220" stroke="#334155" stroke-width="2"/>
+  <circle cx="62" cy="58" r="8" fill="#ef4444"/>
+  <circle cx="90" cy="58" r="8" fill="#f59e0b"/>
+  <circle cx="118" cy="58" r="8" fill="#22c55e"/>
+  <text x="148" y="64" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">continuity demo</text>
+  <text x="56" y="118" fill="#e5e7eb" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="22">$ npm run demo</text>
+  <text x="56" y="166" fill="#38bdf8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">{</text>
+  <text x="82" y="204" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">"identity": "did:tsl:test:alice",</text>
+  <text x="82" y="242" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">"envelope": { "type": "tsl.event.v1", "disclosure_policy": "commitment_only" },</text>
+  <text x="82" y="280" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">"proof": { "tree_kind": "event", "leaf_index": 0 },</text>
+  <text x="82" y="318" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">"checkpoint": { "event_count": 1, "receipt_count": 0 },</text>
+  <text x="82" y="356" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">"redaction_manifest": { "raw_content_included": false },</text>
+  <text x="82" y="394" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">"verification": {</text>
+  <text x="118" y="432" fill="#86efac" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="24">"verified": true,</text>
+  <text x="118" y="470" fill="#86efac" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">"errors": []</text>
+  <text x="82" y="508" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">}</text>
+  <text x="56" y="546" fill="#38bdf8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">}</text>
+</svg>

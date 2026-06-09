@@ -7,7 +7,7 @@ This path is for a local developer preview of Continuity Protocol. It does not p
 - Node.js 20 or newer
 - npm
 - Docker Desktop or Docker Engine for `npm run release:check` and `docker compose`
-- Python 3.11 for Python parity checks
+- Python 3.11 and the root `requirements-dev.txt` dependencies for Python parity checks
 
 ## Fresh Clone
 
@@ -15,6 +15,7 @@ This path is for a local developer preview of Continuity Protocol. It does not p
 git clone https://github.com/omar2001ramadan/contin.git
 cd contin
 npm ci
+python3 -m pip install -r requirements-dev.txt
 npm run demo
 ```
 

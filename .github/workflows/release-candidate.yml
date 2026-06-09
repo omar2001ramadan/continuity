@@ -18,5 +18,6 @@ jobs:
         with:
           python-version: "3.11"
       - run: npm ci
+      - run: python3 -m pip install -r requirements-dev.txt
       - run: npm run release:check
       - run: docker build -f Dockerfile.runtime -t tsl-runtime:ci .

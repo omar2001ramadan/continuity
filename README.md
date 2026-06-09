@@ -7,6 +7,19 @@ Continuity Protocol is a developer-preview implementation of the Trust Signature
 
 This repository is public-launch ready as a developer preview. It is not production-ready, not audited, and not approved for mainnet use.
 
+![Continuity Protocol CLI demo](docs/assets/demo-screenshot.svg)
+
+## What This Is Not
+
+- Not a production identity, reputation, credit, legal, or safety decision system.
+- Not audited security software or audited ZK infrastructure.
+- Not a mainnet deployment, mainnet release, or evidence-approved production registry.
+- Not an npm package launch; the root package intentionally remains private.
+
+## 30-Second Architecture
+
+![Continuity Protocol architecture diagram](docs/assets/architecture-30s.svg)
+
 ## What Works Today
 
 - Canonical JSON bytes, domain-separated hashes, Ed25519 signatures, and deterministic test vectors.
@@ -23,6 +36,7 @@ Requirements: Node.js 20+, npm, Docker for the full release check, and Python 3.
 git clone https://github.com/omar2001ramadan/contin.git
 cd contin
 npm ci
+python3 -m pip install -r requirements-dev.txt
 npm run demo
 ```
 
@@ -45,6 +59,26 @@ docker compose up
 ```
 
 See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the longer path and expected checks.
+
+## Copy-Paste Example
+
+The first command shows the signed event shape. The demo command creates the complete deterministic proof bundle used by the verifier.
+
+```bash
+SEED=000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+npm run cli -- sign-message --message "hello-tsl" --seed-hex "$SEED" > /tmp/continuity-signed-event.json
+npm run demo > /tmp/continuity-proof-bundle.json
+npm run cli -- verify-proof /tmp/continuity-proof-bundle.json
+```
+
+Expected verifier output:
+
+```json
+{
+  "verified": true,
+  "errors": []
+}
+```
 
 ## Maturity Map
 
