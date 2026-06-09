@@ -4,6 +4,7 @@ node_modules/
 packages/core-rust/target/
 contracts/artifacts/
 contracts/cache/
+clients/web-verifier/public/verifier.bundle.js
 circuits/build-production/
 artifacts/zk/production-candidate/
 deployments/local.json

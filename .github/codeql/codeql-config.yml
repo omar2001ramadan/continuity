@@ -1,0 +1,7 @@
+name: continuity-codeql
+
+paths-ignore:
+  - "clients/web-verifier/public/verifier.bundle.js"
+  - "artifacts/**"
+  - "circuits/build/**"
+  - "circuits/build-production/**"

@@ -1,5 +1,6 @@
 import "../../../scripts/load-env.cjs";
 import express from "express";
+import { rateLimit } from "express-rate-limit";
 import {
   assessmentCommitmentHash,
   assessmentHash,
@@ -85,6 +86,12 @@ export function createRelayNode() {
 
   const app = express();
   app.use(express.json({ limit: "1mb" }));
+  app.use(rateLimit({
+    windowMs: Number(process.env.TSL_HTTP_RATE_LIMIT_WINDOW_MS ?? 60_000),
+    limit: Number(process.env.TSL_HTTP_RATE_LIMIT_MAX ?? 1000),
+    standardHeaders: true,
+    legacyHeaders: false
+  }));
 
   function resolver(): TrustResolver {
     return repo ? new CompositeTrustResolver([store.resolver, new PostgresTrustResolver(repo)]) : store.resolver;

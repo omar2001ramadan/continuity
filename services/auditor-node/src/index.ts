@@ -1,5 +1,6 @@
 import "../../../scripts/load-env.cjs";
 import express from "express";
+import { rateLimit } from "express-rate-limit";
 import {
   createPostgresRepositoryFromEnv,
   createQueueFromEnv,
@@ -13,13 +14,14 @@ import {
   type AuditFindingV1,
   type Hex32
 } from "../../../packages/core-ts/src/index";
+import { buildGossipUrl, GossipPeerError, initialGossipPeers, registerRequestedGossipPeer, selectKnownGossipPeers } from "../../shared/gossip-peers";
 
 export function createAuditorNode() {
   const repo = createPostgresRepositoryFromEnv();
   const queue = createQueueFromEnv();
   const settlement = createSettlementBackendFromEnv();
   const findings: AuditFindingV1[] = [];
-  const peers = new Set<string>((process.env.TSL_GOSSIP_PEERS ?? "").split(",").map((peer) => peer.trim()).filter(Boolean));
+  const peers = initialGossipPeers();
   let migrated = false;
   async function ensureRepo() {
     if (!repo) return null;
@@ -32,6 +34,12 @@ export function createAuditorNode() {
   }
   const app = express();
   app.use(express.json({ limit: "1mb" }));
+  app.use(rateLimit({
+    windowMs: Number(process.env.TSL_HTTP_RATE_LIMIT_WINDOW_MS ?? 60_000),
+    limit: Number(process.env.TSL_HTTP_RATE_LIMIT_MAX ?? 1000),
+    standardHeaders: true,
+    legacyHeaders: false
+  }));
   app.get("/health", (_req, res) => res.json({ ok: true, service: "tsl-auditor-node" }));
 
   async function rememberFinding(finding: AuditFindingV1): Promise<void> {
@@ -146,12 +154,17 @@ export function createAuditorNode() {
   });
 
   app.post("/v1/gossip/peers", async (req, res) => {
-    if (req.body.peer_url) {
-      peers.add(String(req.body.peer_url));
-      await (await ensureRepo())?.upsertGossipPeer(String(req.body.peer_url));
+    try {
+      if (req.body.peer_url) {
+        const peerUrl = registerRequestedGossipPeer(req.body.peer_url);
+        peers.add(peerUrl);
+        await (await ensureRepo())?.upsertGossipPeer(peerUrl);
+      }
+      const db = await ensureRepo();
+      res.json({ status: "accepted", peers: db ? await db.listGossipPeers() : [...peers] });
+    } catch (error) {
+      sendGossipError(res, "TSL_GOSSIP_PEER_REJECTED", error);
     }
-    const db = await ensureRepo();
-    res.json({ status: "accepted", peers: db ? await db.listGossipPeers() : [...peers] });
   });
 
   app.get("/v1/gossip/peers", async (_req, res) => {
@@ -162,10 +175,10 @@ export function createAuditorNode() {
   app.post("/v1/gossip/sync", async (req, res) => {
     try {
       const db = await ensureRepo();
-      const peerUrls = req.body.peer_url ? [String(req.body.peer_url)] : db ? await db.listGossipPeers() : [...peers];
+      const peerUrls = selectKnownGossipPeers(req.body.peer_url, db ? await db.listGossipPeers() : peers);
       let imported_findings = 0;
       for (const peerUrl of peerUrls) {
-        const response = await fetch(`${peerUrl.replace(/\/$/, "")}/v1/gossip/audit-findings`);
+        const response = await fetch(buildGossipUrl(peerUrl, "/v1/gossip/audit-findings"));
         if (!response.ok) continue;
         const payload = await response.json() as { findings?: AuditFindingV1[] };
         for (const finding of payload.findings ?? []) {
@@ -190,6 +203,14 @@ export function createAuditorNode() {
   });
 
   return app;
+}
+
+function sendGossipError(res: express.Response, fallbackCode: string, error: unknown): void {
+  if (error instanceof GossipPeerError) {
+    res.status(error.status).json({ error: { code: error.code, message: error.message } });
+    return;
+  }
+  res.status(400).json({ error: { code: fallbackCode, message: error instanceof Error ? error.message : String(error) } });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

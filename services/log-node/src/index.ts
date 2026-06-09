@@ -1,5 +1,6 @@
 import "../../../scripts/load-env.cjs";
 import express from "express";
+import { rateLimit } from "express-rate-limit";
 import {
   createPostgresRepositoryFromEnv,
   createQueueFromEnv,
@@ -14,12 +15,13 @@ import {
   type ReceiptCommitmentV1,
   type RevocationV1
 } from "../../../packages/core-ts/src/index";
+import { buildGossipUrl, GossipPeerError, initialGossipPeers, registerRequestedGossipPeer, selectKnownGossipPeers } from "../../shared/gossip-peers";
 
 export function createLogNode() {
   const repo = createPostgresRepositoryFromEnv();
   const queue = createQueueFromEnv();
   const lastStreamIds = new Map<string, string>();
-  const peers = new Set<string>((process.env.TSL_GOSSIP_PEERS ?? "").split(",").map((peer) => peer.trim()).filter(Boolean));
+  const peers = initialGossipPeers();
   let migrated = false;
   async function requireRepo() {
     if (!repo) throw new Error("TSL_DATABASE_URL or DATABASE_URL is required");
@@ -71,6 +73,12 @@ export function createLogNode() {
 
   const app = express();
   app.use(express.json({ limit: "1mb" }));
+  app.use(rateLimit({
+    windowMs: Number(process.env.TSL_HTTP_RATE_LIMIT_WINDOW_MS ?? 60_000),
+    limit: Number(process.env.TSL_HTTP_RATE_LIMIT_MAX ?? 1000),
+    standardHeaders: true,
+    legacyHeaders: false
+  }));
 
   app.get("/health", (_req, res) => res.json({ ok: true, service: "tsl-log-node" }));
 
@@ -226,11 +234,16 @@ export function createLogNode() {
   });
 
   app.post("/v1/gossip/peers", async (req, res) => {
-    if (req.body.peer_url) {
-      peers.add(String(req.body.peer_url));
-      if (repo) await (await requireRepo()).upsertGossipPeer(String(req.body.peer_url));
+    try {
+      if (req.body.peer_url) {
+        const peerUrl = registerRequestedGossipPeer(req.body.peer_url);
+        peers.add(peerUrl);
+        if (repo) await (await requireRepo()).upsertGossipPeer(peerUrl);
+      }
+      res.json({ status: "accepted", peers: await listPeers() });
+    } catch (error) {
+      sendError(res, error instanceof GossipPeerError ? error.code : "TSL_GOSSIP_PEER_REJECTED", error, error instanceof GossipPeerError ? error.status : 400);
     }
-    res.json({ status: "accepted", peers: await listPeers() });
   });
 
   app.get("/v1/gossip/peers", async (_req, res) => {
@@ -240,17 +253,19 @@ export function createLogNode() {
   app.post("/v1/gossip/sync", async (req, res) => {
     try {
       const db = await requireRepo();
-      const peerUrls = req.body.peer_url ? [String(req.body.peer_url)] : await listPeers();
+      const peerUrls = selectKnownGossipPeers(req.body.peer_url, await listPeers());
       let imported_checkpoints = 0;
       let imported_findings = 0;
       const conflicts: unknown[] = [];
       for (const peerUrl of peerUrls) {
-        const base = peerUrl.replace(/\/$/, "");
-        const summaryResponse = await fetch(`${base}/v1/gossip/checkpoint-summaries`);
+        const summaryResponse = await fetch(buildGossipUrl(peerUrl, "/v1/gossip/checkpoint-summaries"));
         if (summaryResponse.ok) {
           const payload = await summaryResponse.json() as { checkpoints?: Array<Record<string, unknown>> };
           for (const row of payload.checkpoints ?? []) {
-            const checkpoint = await fetch(`${base}/v1/gossip/checkpoints/${row.epoch_start_ms}/${row.shard}`);
+            const epochStartMs = Number(row.epoch_start_ms);
+            const shard = String(row.shard ?? "");
+            if (!Number.isSafeInteger(epochStartMs) || !/^[A-Za-z0-9._:-]{1,128}$/.test(shard)) continue;
+            const checkpoint = await fetch(buildGossipUrl(peerUrl, `/v1/gossip/checkpoints/${epochStartMs}/${encodeURIComponent(shard)}`));
             if (!checkpoint.ok) continue;
             const checkpointPayload = await checkpoint.json() as Record<string, unknown>;
             const imported = (checkpointPayload.checkpoint ?? checkpointPayload) as BatchCheckpointV1;
@@ -263,7 +278,7 @@ export function createLogNode() {
             imported_checkpoints += 1;
           }
         }
-        const findingsResponse = await fetch(`${base}/v1/gossip/audit-findings`);
+        const findingsResponse = await fetch(buildGossipUrl(peerUrl, "/v1/gossip/audit-findings"));
         if (findingsResponse.ok) {
           const payload = await findingsResponse.json() as { findings?: Array<unknown> };
           for (const finding of payload.findings ?? []) {
@@ -359,8 +374,8 @@ export function createLogNode() {
   return app;
 }
 
-function sendError(res: express.Response, code: string, error: unknown): void {
-  res.status(400).json({ error: { code, message: error instanceof Error ? error.message : String(error) } });
+function sendError(res: express.Response, code: string, error: unknown, status = 400): void {
+  res.status(status).json({ error: { code, message: error instanceof Error ? error.message : String(error) } });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
