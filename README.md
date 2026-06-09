@@ -66,9 +66,9 @@ The first command shows the signed event shape. The demo command creates the com
 
 ```bash
 SEED=000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
-npm run cli -- sign-message --message "hello-tsl" --seed-hex "$SEED" > /tmp/continuity-signed-event.json
-npm run demo > /tmp/continuity-proof-bundle.json
-npm run cli -- verify-proof /tmp/continuity-proof-bundle.json
+npm run --silent cli -- sign-message --message "hello-tsl" --seed-hex "$SEED" > /tmp/continuity-signed-event.json
+npm run --silent demo > /tmp/continuity-proof-bundle.json
+npm run --silent cli -- verify-proof /tmp/continuity-proof-bundle.json
 ```
 
 Expected verifier output:
